@@ -4,12 +4,9 @@
  */
 
 // Biblioteca Dexie (IndexadoDB)
-// CORREÇÃO: A importação correta é a 'default export' (a classe Dexie), 
-// e não uma 'named export' chamada 'idb'.
-import Dexie from "https://unpkg.com/dexie@latest/dist/dexie.js";
-
-// A linha abaixo foi removida pois 'Dexie' já é o nome da classe importada.
-// const Dexie = dexieDB;
+// CORREÇÃO: Importação nomeada 'Dexie', 
+// já que as outras tentativas falharam.
+import { Dexie } from "https://unpkg.com/dexie@latest/dist/dexie.js";
 
 export const CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 horas
 
@@ -55,3 +52,4 @@ export async function loadFromCache() {
         idb.giap.toArray()
     ]);
 }
+
