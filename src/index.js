@@ -127,7 +127,11 @@ function updateUIFromState(state) {
     if (state.initialLoadComplete) {
         populateFilters(state.patrimonioFullList);
         applyPatrimonioFiltersAndRender();
-        if (document.getElementById('content-dashboard').classList.contains('active')) {
+        
+        // CORREÇÃO:
+        // O painel do dashboard não tem a classe 'active', ele apenas não tem a classe 'hidden'.
+        // Esta verificação agora é correta e garante que o dashboard seja renderizado no carregamento inicial.
+        if (!document.getElementById('content-dashboard').classList.contains('hidden')) {
              renderDashboard(state.patrimonioFullList);
         }
     }
@@ -441,3 +445,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
