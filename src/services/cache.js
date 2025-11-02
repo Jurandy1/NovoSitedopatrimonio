@@ -4,9 +4,10 @@
  */
 
 // Biblioteca Dexie (IndexadoDB)
-// CORREÇÃO: Importação nomeada 'Dexie', 
-// já que as outras tentativas falharam.
-import { Dexie } from "https://unpkg.com/dexie@latest/dist/dexie.js";
+// CORREÇÃO: Trocando o CDN para 'esm.sh', que é mais confiável 
+// para importações de módulos ES (import ... from ...).
+// Usando a importação 'default' que é a padrão do Dexie.
+import Dexie from "https://esm.sh/dexie@latest";
 
 export const CACHE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 horas
 
