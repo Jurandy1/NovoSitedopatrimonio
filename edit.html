@@ -6,8 +6,14 @@
     <title>Auditoria e Edição - Sistema de Patrimônio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
-    <!-- Dexie.js for IndexedDB Cache (Mantido, mas agora importado via module) -->
-    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    
+    <!-- 
+      CORREÇÃO: Removida a tag <script> do Dexie.js daqui. 
+      Ele agora é importado corretamente como um módulo dentro de 'src/services/cache.js'.
+      Isso evita o conflito e o erro de sintaxe.
+    -->
+    <!-- <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script> -->
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -358,7 +364,7 @@
                             <label for="replace-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui</label>
                             <p class="text-xs text-slate-500 mb-2">As colunas devem estar na ordem: UNIDADE, ITEM, TOMBO, LOCAL, ESTADO DE CONSERVAÇÃO</p>
                             <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel e cole aqui..."></textarea>
-                        </div>
+</div>
                         <button id="preview-replace-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Dados</button>
 
                         <div id="replace-results" class="hidden mt-6 border-t pt-4">
