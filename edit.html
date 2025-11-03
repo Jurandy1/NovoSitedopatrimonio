@@ -360,14 +360,14 @@
             <div id="content-importacao" class="hidden fade-in">
                 <div class="card">
                     <div class="flex border-b mb-6">
-                        <button class="sub-nav-btn active" data-subtab="substituir">Substituir Inventário</button>
-                        <button class="sub-nav-btn" data-subtab="edit-by-desc">Editar por Descrição</button>
+                        <button class="sub-nav-btn" data-subtab="substituir">Substituir Inventário</button>
+                        <button class="sub-nav-btn active" data-subtab="edit-by-desc">Editar por Descrição</button>
                         <button class="sub-nav-btn" data-subtab="massa">Importar por Tombamento</button>
                         <button class="sub-nav-btn" data-subtab="add_giap">Adicionar Unidade GIAP</button>
                     </div>
             
                     <!-- Sub-Aba: Substituir Inventário -->
-                    <div id="subtab-content-substituir">
+                    <div id="subtab-content-substituir" class="hidden">
                         <h2 class="text-xl font-bold text-slate-800 mb-2">Substituir Inventário da Unidade por Planilha</h2>
                         <p class="text-sm text-slate-600 mb-4">Esta ferramenta <strong class="text-red-600">APAGARÁ</strong> todos os itens da unidade selecionada e os substituirá pelos dados colados abaixo. Use com muito cuidado.</p>
                         
@@ -409,35 +409,49 @@
                     </div>
                     
                     <!-- INÍCIO: Alterações na Sub-Aba: Editar por Descrição -->
-                    <div id="subtab-content-edit-by-desc" class="hidden">
+                    <div id="subtab-content-edit-by-desc">
                         <h2 class="text-xl font-bold text-slate-800 mb-2">Atualizar Itens por Descrição (Importação Inteligente)</h2>
                         <p class="text-sm text-slate-600 mb-4">
-                            Esta ferramenta atualiza itens existentes na unidade selecionada. Ela compara sua planilha com o sistema usando <strong class="text-blue-600">descrição similar e localização</strong>.
-                            Você poderá aprovar quais itens devem ter o <strong>Tombamento, Localização e Estado</strong> atualizados.
+                            Esta ferramenta atualiza itens existentes. Ela compara sua planilha com o sistema usando <strong class="text-blue-600">descrição similar</strong>.
+                            Funciona para <strong class="text-green-600">uma ou mais unidades</strong> ao mesmo tempo.
                         </p>
-
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label for="edit-by-desc-tipo" class="block text-sm font-medium mb-1">Tipo de Unidade de Destino</label>
-                                <select id="edit-by-desc-tipo" class="w-full p-2 border rounded-lg bg-white"></select>
-                            </div>
-                            <div>
-                                <label for="edit-by-desc-unit" class="block text-sm font-medium mb-1">Unidade de Destino (a ser atualizada)</label>
-                                <select id="edit-by-desc-unit" class="w-full p-2 border rounded-lg bg-white" disabled></select>
+                        
+                        <!-- 1. Seleção de Campos a Atualizar -->
+                        <div class="mb-4 p-4 border rounded-lg bg-slate-50">
+                            <label class="block text-base font-semibold mb-3 text-slate-800">1. Quais campos você deseja atualizar?</label>
+                            <p class="text-xs text-slate-500 mb-3">Marque os campos da sua planilha que devem <strong class="text-red-600">SOBRESCREVER</strong> os dados do sistema. Campos desmarcados serão ignorados.</p>
+                            <div id="edit-by-desc-fields" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Tombamento" checked>Tombamento</label>
+                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Localização" checked>Localização</label>
+                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Estado" checked>Estado</label>
+                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Observação">Observação</label>
+                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Descrição">Descrição</label>
                             </div>
                         </div>
 
-                        <div>
-                            <label for="edit-by-desc-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui (com cabeçalho)</label>
+                        <!-- 2. Colar Dados -->
+                        <div class="mb-4">
+                            <label for="edit-by-desc-data" class="block text-base font-semibold mb-2 text-slate-800">2. Cole os dados do Excel aqui (com cabeçalho)</label>
                             <p class="text-xs text-slate-500 mb-2">
-                                O sistema identificará os cabeçalhos: <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO DE CONSERVAÇÃO (ou Estado)</strong>.
+                                O sistema identificará os cabeçalhos: <strong class="text-blue-600">UNIDADE</strong> (Obrigatório), <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO (ou Estado de Conservação)</strong>, <strong>OBS (ou Observacao)</strong>.
                             </p>
                             <textarea id="edit-by-desc-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
-                        <button id="preview-edit-by-desc-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Comparação</button>
+                        <button id="preview-edit-by-desc-btn" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">1. Pré-visualizar Unidades</button>
 
+                        <!-- 3. Mapeamento de Unidades (Nova Etapa) -->
+                        <div id="edit-by-desc-unit-matching" class="hidden mt-6 border-t pt-4">
+                             <h3 class="font-bold text-slate-700 mb-2 text-base">2. Confirme o Mapeamento das Unidades</h3>
+                             <p class="text-sm text-slate-600 mb-4">Encontramos unidades na sua planilha. Confirme para qual unidade do sistema cada uma delas aponta. Unidades "Ignorar" não serão processadas.</p>
+                             <div id="edit-by-desc-unit-table-container" class="reconciliation-container overflow-y-auto space-y-2 p-2 bg-slate-50 border rounded-lg">
+                                <!-- Tabela de mapeamento de unidades será inserida aqui -->
+                             </div>
+                             <button id="confirm-unit-mapping-btn" class="mt-4 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">2. Confirmar Unidades e Ver Itens</button>
+                        </div>
+
+                        <!-- 4. Revisão dos Itens (Antigo Results) -->
                         <div id="edit-by-desc-results" class="hidden mt-6 border-t pt-4">
-                             <h3 class="font-bold text-slate-700 mb-2">Comparação de Itens (<span id="edit-by-desc-preview-count">0</span> itens da planilha)</h3>
+                             <h3 class="font-bold text-slate-700 mb-2 text-base">3. Revise as Atualizações de Itens (<span id="edit-by-desc-preview-count">0</span> itens da planilha)</h3>
                              <p class="text-sm text-slate-600 mb-4">Revise as correspondências. Itens em <span class="text-green-600 font-semibold">verde</span> tiveram alta similaridade e estão pré-selecionados para <strong class="text-green-800">Atualizar</strong>. Itens em <span class="text-yellow-600 font-semibold">amarelo</span> tiveram similaridade média. Itens em <span class="text-red-600 font-semibold">vermelho</span> não foram encontrados no sistema para esta unidade.</p>
                             
                              <!-- Controles de Ação em Massa -->
@@ -459,7 +473,7 @@
                                 <!-- A tabela de pré-visualização será inserida aqui pelo JS -->
                             </div>
                              <div class="mt-4">
-                                <button id="confirm-edit-by-desc-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:bg-slate-400">Confirmar e Atualizar Itens</button>
+                                <button id="confirm-edit-by-desc-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:bg-slate-400">3. Confirmar e Atualizar Itens</button>
                             </div>
                         </div>
                     </div>
