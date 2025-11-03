@@ -115,7 +115,7 @@
                         <!-- FIM NOVO BOTÃO -->
                         
                         <button id="delete-selected-btn" class="hidden bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center gap-2">
-                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11v1z"/></svg>
+                           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11v1z"/></svg>
                            Excluir Selecionados (<span id="delete-selected-count">0</span>)
                         </button>
                     </div>
@@ -385,7 +385,7 @@
                         <div>
                             <label for="replace-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui</label>
                             <!-- INÍCIO DA ALTERAÇÃO: Texto de ajuda corrigido -->
-                            <p class="text-xs text-slate-500 mb-2">Cole os dados do Excel, <strong class="text-red-600">incluindo o cabeçalho</strong>. O sistema espera as colunas: <strong>Descrição</strong> (ou ITEM), <strong>Tombamento</strong> (ou TOMBO), <strong>Local</strong> (ou LOCALIZAÇÃO), e <strong>Estado de Conservação</strong> (ou ESTADO). A coluna 'Unidade' é ignorada (use o seletor acima).</p>
+                            <p class="text-xs text-slate-500 mb-2">Cole os dados do Excel, <strong class="text-red-600">incluindo o cabeçalho</strong>. O sistema espera as colunas: <strong>Descrição</strong> (ou ITEM), <strong>Tombamento</strong> (ou TOMBO), <strong>Local</strong> (ou LOCALIZAÇÃO), <strong>Estado de Conservação</strong> (ou ESTADO) e **Origem da Doação**.</p>
                             <!-- FIM DA ALTERAÇÃO -->
                             <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
@@ -433,7 +433,7 @@
                         <div class="mb-4">
                             <label for="edit-by-desc-data" class="block text-base font-semibold mb-2 text-slate-800">2. Cole os dados do Excel aqui (com cabeçalho)</label>
                             <p class="text-xs text-slate-500 mb-2">
-                                O sistema identificará os cabeçalhos: <strong class="text-blue-600">UNIDADE</strong> (Obrigatório), <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO (ou Estado de Conservação)</strong>, <strong>OBS (ou Observacao)</strong>.
+                                O sistema identificará os cabeçalhos: <strong class="text-blue-600">UNIDADE</strong> (Obrigatório), <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO (ou Estado de Conservação)</strong>, **ORIGEM DA DOACAO**, e **OBS (ou Observacao)**.
                             </p>
                             <textarea id="edit-by-desc-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
@@ -758,13 +758,13 @@
              <div class="p-6 space-y-4 overflow-y-auto" style="max-height: 70vh;">
                 <h4 class="font-bold text-slate-800">Item da Planilha (Não Encontrado):</h4>
                 <div id="manual-link-pasted-item" class="p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
-                    <!-- Detalhes do item colado serão inseridos aqui -->
+                    <!-- Detalhes do item colado serão inseridos aqui (Incluindo Estado e Origem) -->
                 </div>
                 
                 <hr class="my-4">
 
                 <h4 class="font-bold text-slate-800">Ligar com qual item do Sistema?</h4>
-                <p class="text-sm text-slate-600">Selecione o item correto da unidade <strong id="manual-link-unit-name"></strong> que deve corresponder ao item acima.</p>
+                <p class="text-sm text-slate-600">Selecione o item correto da unidade <strong id="manual-link-unit-name"></strong> que deve corresponder ao item acima. Apenas itens S/T são listados.</p>
                 <!-- Mensagem de feedback do filtro por localização -->
                 <div id="manual-link-filter-message" class="text-sm p-2 bg-blue-50 border-blue-200 border rounded-lg">
                     Listando todos os itens S/T desta unidade.
