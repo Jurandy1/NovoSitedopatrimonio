@@ -6,7 +6,8 @@
 // INÍCIO DA ALTERAÇÃO: Importa 'updateDoc' e a função de similaridade
 import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc, updateDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
-import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from '../utils/helpers.js';
+// INÍCIO DA ALTERAÇÃO: Adiciona 'debounce'
+import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo, debounce } from '../utils/helpers.js';
 import { calculateSimilarity } from '../utils/similarity.js'; // Importa a função de similaridade
 import { idb } from '../services/cache.js';
 // FIM DA ALTERAÇÃO
@@ -63,6 +64,15 @@ const extractOrigemDoacao = (item) => {
 };
 // FIM: Adiciona função
 
+// INÍCIO DA ALTERAÇÃO: Estado local para a importação multi-unidade
+let multiUnitImportData = {
+    pasted: [], // Todos os itens colados
+    unitMap: new Map(), // Mapeamento: "Unidade Colada" -> "Unidade Sistema"
+    fieldUpdates: {}, // Campos a atualizar: { Tombamento: true, ... }
+    comparisonData: [] // Dados de comparação item-a-item
+};
+// FIM DA ALTERAÇÃO
+
 const DOM_IMPORT = {
     // Nav
     subTabNav: document.querySelectorAll('#content-importacao .sub-nav-btn'),
@@ -78,19 +88,23 @@ const DOM_IMPORT = {
     confirmReplaceBtn: document.getElementById('confirm-replace-btn'),
     
     // Editar por Descrição
-    editByDescTipo: document.getElementById('edit-by-desc-tipo'),
-    editByDescUnit: document.getElementById('edit-by-desc-unit'),
+    // INÍCIO DA ALTERAÇÃO: Remove selects de tipo/unidade, adiciona container de campos
+    editByDescFields: document.getElementById('edit-by-desc-fields'),
+    // FIM DA ALTERAÇÃO
     editByDescData: document.getElementById('edit-by-desc-data'),
     previewEditByDescBtn: document.getElementById('preview-edit-by-desc-btn'),
+    // INÍCIO DA ALTERAÇÃO: Adiciona novos containers de UI
+    editByDescUnitMatching: document.getElementById('edit-by-desc-unit-matching'),
+    editByDescUnitTableContainer: document.getElementById('edit-by-desc-unit-table-container'),
+    confirmUnitMappingBtn: document.getElementById('confirm-unit-mapping-btn'),
+    // FIM DA ALTERAÇÃO
     editByDescResults: document.getElementById('edit-by-desc-results'),
     editByDescPreviewTableContainer: document.getElementById('edit-by-desc-preview-table-container'),
     confirmEditByDescBtn: document.getElementById('confirm-edit-by-desc-btn'),
-    // INÍCIO DA ALTERAÇÃO: IDs para Ações em Massa
     editByDescSelectAll: document.getElementById('edit-by-desc-select-all'),
     editByDescBulkAction: document.getElementById('edit-by-desc-bulk-action'),
     editByDescBulkApply: document.getElementById('edit-by-desc-bulk-apply'),
     editByDescSummary: document.getElementById('edit-by-desc-summary'),
-    // FIM DA ALTERAÇÃO
     
     // Importar em Massa
     massTransferTombos: document.getElementById('mass-transfer-tombos'),
@@ -127,7 +141,7 @@ export function populateImportAndReplaceTab() {
     const selects = [
         DOM_IMPORT.massTransferTipo,
         DOM_IMPORT.replaceTipo,
-        DOM_IMPORT.editByDescTipo
+        // DOM_IMPORT.editByDescTipo // Removido
     ];
 
     selects.forEach(select => {
@@ -168,9 +182,130 @@ function setupUnitSelect(tipoSelectEl, unitSelectEl) {
 // --- INÍCIO DA ALTERAÇÃO: Funções da Lógica "Editar por Descrição" ---
 
 /**
+ * ETAPA 1: Renderiza a UI de Mapeamento de Unidades.
+ * @param {Map<string, string>} unitsToMatch - Mapa de "unidade colada" -> "melhor palpite do sistema".
+ */
+function renderUnitMatchingUI(unitsToMatch) {
+    const { normalizedSystemUnits } = getState();
+    const systemUnits = [...normalizedSystemUnits.values()].sort();
+    
+    const systemUnitOptions = `<option value="">-- Ignorar Unidade --</option>` + 
+                              systemUnits.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+
+    let tableHtml = `
+        <table class="w-full text-sm">
+            <thead class="bg-slate-200">
+                <tr>
+                    <th class="p-2 text-left">Unidade na Planilha (Colada)</th>
+                    <th class="p-2 text-left">Unidade Correspondente no Sistema</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    unitsToMatch.forEach((bestMatch, pastedUnit) => {
+        tableHtml += `
+            <tr class="border-b" data-pasted-unit="${escapeHtml(pastedUnit)}">
+                <td class="p-2 font-medium">${escapeHtml(pastedUnit)}</td>
+                <td class="p-2">
+                    <select class="unit-mapping-select w-full p-2 border rounded-lg bg-white">
+                        ${systemUnitOptions}
+                    </select>
+                </td>
+            </tr>
+        `;
+    });
+    
+    tableHtml += `</tbody></table>`;
+    DOM_IMPORT.editByDescUnitTableContainer.innerHTML = tableHtml;
+
+    // Pré-seleciona a melhor correspondência encontrada
+    unitsToMatch.forEach((bestMatch, pastedUnit) => {
+        const select = DOM_IMPORT.editByDescUnitTableContainer.querySelector(`tr[data-pasted-unit="${escapeHtml(pastedUnit)}"] select`);
+        if (select && bestMatch) {
+            select.value = bestMatch;
+        }
+    });
+
+    // Mostra a etapa 2 e esconde a 3
+    DOM_IMPORT.editByDescUnitMatching.classList.remove('hidden');
+    DOM_IMPORT.editByDescResults.classList.add('hidden');
+}
+
+
+/**
+ * ETAPA 2: Processa o mapeamento de unidades e prepara os dados de comparação de itens.
+ */
+function processUnitMappingAndLoadItems() {
+    const { patrimonioFullList } = getState();
+    
+    // 1. Lê o mapeamento final da UI
+    multiUnitImportData.unitMap.clear();
+    const mappingRows = DOM_IMPORT.editByDescUnitTableContainer.querySelectorAll('tr[data-pasted-unit]');
+    mappingRows.forEach(row => {
+        const pastedUnit = row.dataset.pastedUnit;
+        const selectedSystemUnit = row.querySelector('.unit-mapping-select').value;
+        if (pastedUnit && selectedSystemUnit) {
+            multiUnitImportData.unitMap.set(pastedUnit, selectedSystemUnit);
+        }
+    });
+
+    if (multiUnitImportData.unitMap.size === 0) {
+        showNotification('Nenhuma unidade foi mapeada. Processo interrompido.', 'warning');
+        return;
+    }
+
+    // 2. Prepara os dados de comparação
+    multiUnitImportData.comparisonData = [];
+    
+    // Agrupa os itens do sistema por unidade para performance
+    const systemItemsByUnit = new Map();
+    multiUnitImportData.unitMap.forEach(systemUnit => {
+        if (!systemItemsByUnit.has(systemUnit)) {
+            // Clona a lista de itens para não modificar a original durante a busca
+            const items = [...patrimonioFullList.filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnit))];
+            systemItemsByUnit.set(systemUnit, items);
+        }
+    });
+
+    // 3. Itera sobre os itens colados e encontra correspondências
+    multiUnitImportData.pasted.forEach(pastedItem => {
+        const pastedUnitName = pastedItem.unidade || '';
+        const systemUnitName = multiUnitImportData.unitMap.get(pastedUnitName);
+
+        // Se a unidade não foi mapeada ou foi ignorada, pula o item
+        if (!systemUnitName) {
+            return;
+        }
+
+        let systemItemsForUnit = systemItemsByUnit.get(systemUnitName);
+        if (!systemItemsForUnit) {
+            return; // Não deveria acontecer, mas por segurança
+        }
+        
+        const { match, score } = findBestMatch(pastedItem, systemItemsForUnit);
+        multiUnitImportData.comparisonData.push({ 
+            pastedItem, 
+            bestMatch: match, 
+            score, 
+            systemUnitName // Adiciona a unidade do sistema para referência
+        });
+    });
+
+    // 4. Renderiza a tabela de revisão de itens (Etapa 3)
+    renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+    
+    // Mostra a etapa 3 e esconde a 2
+    DOM_IMPORT.editByDescResults.classList.remove('hidden');
+    DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
+    document.getElementById('edit-by-desc-preview-count').textContent = multiUnitImportData.comparisonData.length;
+}
+
+
+/**
  * Encontra a melhor correspondência para um item da planilha no inventário do sistema.
  * @param {object} pastedItem - O item da planilha.
- * @param {Array<object>} systemItems - Itens do sistema na unidade selecionada.
+ * @param {Array<object>} systemItems - Itens do sistema na unidade selecionada (será modificado).
  */
 function findBestMatch(pastedItem, systemItems) {
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
@@ -185,6 +320,9 @@ function findBestMatch(pastedItem, systemItems) {
 
     for (let i = 0; i < systemItems.length; i++) {
         const systemItem = systemItems[i];
+        // Não permite vincular a um item que já está marcado como "PERMUTA"
+        if (systemItem.isPermuta) continue; 
+        
         const systemDesc = normalizeStr(systemItem.Descrição);
         
         // Calcula a similaridade da descrição
@@ -204,7 +342,7 @@ function findBestMatch(pastedItem, systemItems) {
     // Lógica de desempate (Req A): Prioriza o mesmo local
     if (pastedLocal) {
         const potentialMatches = systemItems.filter(item => 
-            calculateSimilarity(pastedDesc, normalizeStr(item.Descrição)) > 0.7
+            !item.isPermuta && calculateSimilarity(pastedDesc, normalizeStr(item.Descrição)) > 0.7
         );
         
         if (potentialMatches.length > 1) {
@@ -212,6 +350,11 @@ function findBestMatch(pastedItem, systemItems) {
                 normalizeStr(item.Localização) === pastedLocal
             );
             if (localMatch) {
+                // Remove a correspondência encontrada da lista para evitar correspondências duplicadas
+                const matchIndex = systemItems.findIndex(item => item.id === localMatch.id);
+                if (matchIndex > -1) {
+                    systemItems.splice(matchIndex, 1);
+                }
                 return { match: localMatch, score: 1.0, reason: 'Descrição e Localização' };
             }
         }
@@ -229,8 +372,9 @@ function findBestMatch(pastedItem, systemItems) {
 /**
  * Renderiza a tabela de comparação para "Editar por Descrição". (Req B)
  * @param {Array<object>} comparisonData - Dados processados da comparação.
+ * @param {object} fieldUpdates - Objeto {Tombamento: true, ...}
  */
-function renderEditByDescPreview(comparisonData) {
+function renderEditByDescPreview(comparisonData, fieldUpdates) {
     const container = DOM_IMPORT.editByDescPreviewTableContainer;
     
     // Cabeçalho da Tabela
@@ -252,13 +396,24 @@ function renderEditByDescPreview(comparisonData) {
     let notFoundCount = 0;
 
     comparisonData.forEach((row, index) => {
-        const { pastedItem, bestMatch, score } = row;
+        const { pastedItem, bestMatch, score, systemUnitName } = row;
 
+        // --- Dados da Planilha ---
         const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
         const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo || 'S/T');
         const pastedLocal = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/I');
         const pastedEstadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
         const pastedEstado = normalizeEstadoConservacao(pastedEstadoInput);
+        const pastedObs = escapeHtml(pastedItem.observacao || pastedItem.obs || '');
+
+        let planilhaHtml = `
+            <p class="font-semibold">${pastedDesc} ${fieldUpdates.Descrição ? '<span class="text-red-500">(Atualizar)</span>' : ''}</p>
+            <p><strong>Tombo:</strong> ${fieldUpdates.Tombamento ? `<span class="text-red-500">${pastedTombo}</span>` : 'Ignorado'}</p>
+            <p><strong>Local:</strong> ${fieldUpdates.Localização ? `<span class="text-red-500">${pastedLocal}</span>` : 'Ignorado'}</p>
+            <p><strong>Estado:</strong> ${fieldUpdates.Estado ? `<span class="text-red-500">${pastedEstado}</span>` : 'Ignorado'}</p>
+            <p><strong>Obs:</strong> ${fieldUpdates.Observação ? `<span class="text-red-500">${pastedObs || '...'}</span>` : 'Ignorado'}</p>
+            <p class="text-xs text-blue-600">Unidade (Planilha): ${escapeHtml(pastedItem.unidade)}</p>
+        `;
 
         let rowClass = '';
         let systemHtml = '';
@@ -273,11 +428,11 @@ function renderEditByDescPreview(comparisonData) {
                 <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
                 <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
                 <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
-                <p class="text-xs text-slate-500">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+                <p class="text-xs text-slate-500">Unidade (Sistema): ${systemUnitName} | ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
             `;
             actionHtml = `
                 <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
-                    <option value="update" selected>Atualizar Tombo/Local/Estado</option>
+                    <option value="update" selected>Atualizar Campos Marcados</option>
                     <option value="ignore">Ignorar</option>
                 </select>
             `;
@@ -289,31 +444,26 @@ function renderEditByDescPreview(comparisonData) {
                 <p class="font-semibold text-yellow-800">${escapeHtml(bestMatch.Descrição)}</p>
                 <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
                 <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
-                <p class="text-xs text-slate-500">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+                <p class="text-xs text-slate-500">Unidade (Sistema): ${systemUnitName} | ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
             `;
             actionHtml = `
                 <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
                     <option value="ignore" selected>Ignorar (Revisar)</option>
-                    <option value="update">Atualizar Tombo/Local/Estado</option>
+                    <option value="update">Atualizar Campos Marcados</option>
                 </select>
             `;
         } else {
             // Não Encontrado (Vermelho)
             notFoundCount++;
             rowClass = 'bg-red-50 opacity-70';
-            systemHtml = `<p class="font-semibold text-red-700">Nenhum item similar encontrado no sistema para esta unidade.</p>`;
+            systemHtml = `<p class="font-semibold text-red-700">Nenhum item similar encontrado na unidade "${systemUnitName}".</p>`;
             actionHtml = `<select class="edit-by-desc-action w-full p-2 border rounded-lg bg-slate-100" disabled><option value="not_found">Não Encontrado</option></select>`;
         }
 
         html += `
             <tr class="border-b ${rowClass}" data-row-index="${index}">
                 <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${actionHtml.includes('disabled') ? 'disabled' : ''}></td>
-                <td class="p-2 align-top">
-                    <p class="font-semibold">${pastedDesc}</p>
-                    <p><strong>Novo Tombo:</strong> ${pastedTombo}</p>
-                    <p><strong>Novo Local:</strong> ${pastedLocal}</p>
-                    <p><strong>Novo Estado:</strong> ${pastedEstado} <span class="text-xs text-slate-500">(${escapeHtml(pastedEstadoInput)})</span></p>
-                </td>
+                <td class="p-2 align-top">${planilhaHtml}</td>
                 <td class="p-2 align-top">${systemHtml}</td>
                 <td class="p-2 align-top">${actionHtml}</td>
             </tr>
@@ -355,7 +505,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
     // 1. Setup para selects de unidade
     setupUnitSelect(DOM_IMPORT.massTransferTipo, DOM_IMPORT.massTransferUnit);
     setupUnitSelect(DOM_IMPORT.replaceTipo, DOM_IMPORT.replaceUnit);
-    setupUnitSelect(DOM_IMPORT.editByDescTipo, DOM_IMPORT.editByDescUnit);
+    // setupUnitSelect(DOM_IMPORT.editByDescTipo, DOM_IMPORT.editByDescUnit); // Removido
 
     // 2. Lógica de Importação em Massa
     DOM_IMPORT.massTransferSearchBtn.addEventListener('click', async () => {
@@ -541,7 +691,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     <td class="p-2">${desc}</td>
                     <td class="p-2 font-mono">${tombo}</td>
                     <td class="p-2">${local}</td>
-                    <td classd="p-2">
+                    <td class="p-2">
                         <span class="font-semibold text-blue-600">${escapeHtml(estadoNormalizado)}</span>
                         <span class="text-xs text-slate-500" title="Valor original colado">(${escapeHtml(estadoInput)})</span>
                     </td>
@@ -647,15 +797,18 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
     // 5. Lógica de Edição por Descrição (Preview e Confirmação)
     
-    // Armazena os dados da planilha colada para usar na confirmação
-    let pastedDataForUpdate = [];
-    
+    // ETAPA 1: Clique em "Pré-visualizar Unidades"
     DOM_IMPORT.previewEditByDescBtn.addEventListener('click', () => {
-        const unidade = DOM_IMPORT.editByDescUnit.value;
-        if (!unidade) return showNotification('Selecione a Unidade de destino.', 'warning');
-        
+        // Reseta o estado local
+        multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] };
+
         const data = DOM_IMPORT.editByDescData.value;
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
+        
+        // Lê os campos a atualizar
+        DOM_IMPORT.editByDescFields.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            multiUnitImportData.fieldUpdates[cb.dataset.field] = cb.checked;
+        });
         
         const parsed = Papa.parse(data, { 
             header: true, 
@@ -665,25 +818,45 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }).data;
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
+
+        // Verifica se a coluna "UNIDADE" existe
+        if (!parsed[0].hasOwnProperty('unidade')) {
+            return showNotification('Coluna "UNIDADE" não encontrada na planilha. Esta coluna é obrigatória para esta ferramenta.', 'error');
+        }
         
-        // Armazena os dados colados para uso posterior
-        pastedDataForUpdate = parsed;
+        multiUnitImportData.pasted = parsed;
+        const { normalizedSystemUnits } = getState();
+        const systemUnits = [...normalizedSystemUnits.values()];
 
-        const { patrimonioFullList } = getState();
-        // Clona a lista de itens do sistema para não modificar a original durante a busca
-        let systemItemsInUnit = [...patrimonioFullList.filter(i => normalizeStr(i.Unidade) === normalizeStr(unidade))];
+        // Encontra unidades únicas da planilha
+        const pastedUnits = new Set(parsed.map(item => item.unidade).filter(Boolean));
+        const unitsToMatch = new Map();
 
-        const comparisonData = parsed.map(pastedItem => {
-            const { match, score } = findBestMatch(pastedItem, systemItemsInUnit);
-            return { pastedItem, bestMatch: match, score };
+        // Tenta encontrar a melhor correspondência
+        pastedUnits.forEach(pastedUnit => {
+            let bestMatch = '';
+            let bestScore = 0;
+            const normPasted = normalizeStr(pastedUnit);
+
+            systemUnits.forEach(systemUnit => {
+                const score = calculateSimilarity(normPasted, normalizeStr(systemUnit));
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = systemUnit;
+                }
+            });
+            
+            // Se a similaridade for alta, sugere
+            unitsToMatch.set(pastedUnit, bestScore > 0.7 ? bestMatch : '');
         });
         
-        DOM_IMPORT.editByDescResults.classList.remove('hidden');
-        document.getElementById('edit-by-desc-preview-count').textContent = parsed.length;
-        
-        // Renderiza a nova tabela de comparação (Req B)
-        renderEditByDescPreview(comparisonData);
+        // Renderiza a Etapa 2 (Mapeamento de Unidades)
+        renderUnitMatchingUI(unitsToMatch);
     });
+
+    // ETAPA 2: Clique em "Confirmar Unidades e Ver Itens"
+    DOM_IMPORT.confirmUnitMappingBtn.addEventListener('click', debounce(processUnitMappingAndLoadItems, 200));
+
     
     // Listeners para Ações em Massa (Req D)
     if (DOM_IMPORT.editByDescSelectAll) {
@@ -722,31 +895,51 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // Listener de Confirmação (Req C)
+    // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
         const itemsToUpdate = [];
+        const { fieldUpdates, comparisonData } = multiUnitImportData;
 
         actionSelects.forEach(select => {
             if (select.value === 'update') {
                 const systemId = select.dataset.systemId;
                 const rowIndex = parseInt(select.closest('tr').dataset.rowIndex, 10);
-                const pastedItem = pastedDataForUpdate[rowIndex];
+                const { pastedItem, bestMatch } = comparisonData[rowIndex];
                 
-                if (systemId && pastedItem) {
-                    const newTombo = pastedItem.tombamento || pastedItem.tombo || 'S/T';
-                    const newLocal = pastedItem.local || pastedItem.localizacao || '';
-                    const newEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
+                if (systemId && pastedItem && bestMatch) {
                     
+                    // Constrói o objeto de 'changes' com base nos campos selecionados
+                    const changes = { updatedAt: serverT() };
+                    let obs = bestMatch.Observação || '';
+                    
+                    if (fieldUpdates.Tombamento) {
+                        changes.Tombamento = pastedItem.tombamento || pastedItem.tombo || 'S/T';
+                    }
+                    if (fieldUpdates.Localização) {
+                        changes.Localização = pastedItem.local || pastedItem.localizacao || '';
+                    }
+                    if (fieldUpdates.Estado) {
+                        changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
+                    }
+                    if (fieldUpdates.Descrição) {
+                        changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
+                    }
+                    if (fieldUpdates.Observação) {
+                        // Substitui a observação antiga
+                        changes.Observação = pastedItem.observacao || pastedItem.obs || '';
+                    }
+                    
+                    // Adiciona uma nota de auditoria
+                    if (fieldUpdates.Tombamento && (changes.Tombamento !== bestMatch.Tombamento)) {
+                        obs = `[Tombo anterior: ${bestMatch.Tombamento}] ` + obs;
+                    }
+                    changes.Observação = `[Atualizado via Importação] ` + (changes.Observação || obs);
+
+
                     itemsToUpdate.push({
                         id: systemId,
-                        changes: {
-                            Tombamento: newTombo,
-                            Localização: newLocal,
-                            Estado: newEstado,
-                            Observação: `Atualizado via "Editar por Descrição". (Tombo anterior: ${select.closest('tr').querySelector('.font-semibold.text-green-800') ? select.closest('tr').querySelector('p:nth-child(2)').textContent : 'N/A'})`,
-                            updatedAt: serverT()
-                        }
+                        changes: changes
                     });
                 }
             }
@@ -774,10 +967,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
             
             // Reseta a UI da aba
             DOM_IMPORT.editByDescResults.classList.add('hidden');
+            DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
             DOM_IMPORT.editByDescData.value = '';
-            pastedDataForUpdate = [];
+            multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] }; // Reseta estado local
 
-            reloadDataCallback(); // Chama o reload global
+            reloadDataCallback(true); // Chama o reload global
         } catch (error) {
             hideOverlay();
             showNotification('Erro ao salvar as atualizações.', 'error');
