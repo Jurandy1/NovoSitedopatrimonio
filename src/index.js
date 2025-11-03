@@ -147,10 +147,14 @@ function renderDashboard(items) {
     const getNormalizedEstado = (estadoStr) => {
         const normalized = normalizeStr(estadoStr);
         if (['avariado', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
-        if (normalized === 'novo') return 'Novo';
-        if (normalized === 'bom' || normalized === 'otimo') return 'Bom';
-        if (normalized === 'regular') return 'Regular';
-        return 'Avariado';
+        
+        // CORREÇÃO: Usar startsWith para permitir "Novo (Doação)", "Bom (Permuta)", etc.
+        if (normalized.startsWith('novo')) return 'Novo';
+        if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
+        if (normalized.startsWith('regular')) return 'Regular';
+        
+        if (normalized === '') return 'N/D'; // Para itens sem estado definido
+        return 'Regular'; // Padrão mais seguro que 'Avariado' para estados desconhecidos
     };
 
     kpi('kpi-total-itens', items.reduce((s, i) => s + (i.Quantidade || 1), 0));
@@ -163,7 +167,8 @@ function renderDashboard(items) {
     const estadoCtx = document.getElementById('dashboardEstadoChart')?.getContext('2d');
     if (estadoCtx) {
         if (window.dashboardEstadoChart) window.dashboardEstadoChart.destroy();
-        window.dashboardEstadoChart = new Chart(estadoCtx, { type: 'doughnut', data: { labels: Object.keys(estadosCount), datasets: [{ data: Object.values(estadosCount), backgroundColor: ['#ef4444', '#10b981', '#3b82f6', '#f59e0b'] }] }, options: { responsive: true, maintainAspectRatio: false } });
+        // Adicionando uma cor extra para a categoria 'N/D' (Não Definido)
+        window.dashboardEstadoChart = new Chart(estadoCtx, { type: 'doughnut', data: { labels: Object.keys(estadosCount), datasets: [{ data: Object.values(estadosCount), backgroundColor: ['#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#64748b'] }] }, options: { responsive: true, maintainAspectRatio: false } });
     }
 
     const unidadesCount = items.reduce((a, i) => { const u = i.Unidade || 'N/D'; a[u] = (a[u] || 0) + 1; return a; }, {});
@@ -214,10 +219,14 @@ function updateUnidadeFilter(tipoSelectEl, unidadeSelectEl, items) {
 function getNormalizedEstado(state) {
     const normalized = normalizeStr(state);
     if (['avariado', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
-    if (normalized === 'novo') return 'Novo';
-    if (normalized === 'bom' || normalized === 'otimo') return 'Bom';
-    if (normalized === 'regular') return 'Regular';
-    return 'Avariado';
+    
+    // CORREÇÃO: Usar startsWith para permitir "Novo (Doação)", "Bom (Permuta)", etc.
+    if (normalized.startsWith('novo')) return 'Novo';
+    if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
+    if (normalized.startsWith('regular')) return 'Regular';
+
+    if (normalized === '') return 'N/D'; // Para itens sem estado definido
+    return 'Regular'; // Padrão mais seguro que 'Avariado' para estados desconhecidos
 }
 
 function getStateColor(state) {
@@ -445,4 +454,5 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
 
