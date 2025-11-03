@@ -1,4 +1,4 @@
-// src/edit.js
+// src/edit.js// src/edit.js
 // Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
 // Centraliza a lógica para todas as abas de administração (Edição, Mapeamento, Conciliação, etc.).
 
@@ -755,3 +755,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
