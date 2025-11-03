@@ -5,11 +5,12 @@
  */
 
 // --- IMPORTS DE SERVIÇOS E ESTADO ---
-import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns } from './services/firebase.js';
+import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
 import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
-import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml } from './utils/helpers.js';
-// CORREÇÃO: Importar getState
+// INÍCIO DA ALTERAÇÃO: Importar normalizeTombo
+import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from './utils/helpers.js';
+// FIM DA ALTERAÇÃO
 import { subscribe, setState, getState } from './state/globalStore.js';
 
 // --- IMPORTS DOS MÓDULOS DE ADMINISTRAÇÃO (A LÓGICA DAS ABAS) ---
@@ -38,6 +39,15 @@ const DOM = {
     // Navegação de Sub-abas (usada aqui para gerenciar a troca de conteúdo)
     subTabNavConciliar: document.querySelectorAll('#content-conciliar .sub-nav-btn'),
     subTabNavImportacao: document.querySelectorAll('#content-importacao .sub-nav-btn'),
+
+    // INÍCIO DA ALTERAÇÃO: Novo Modal "Atualizar do GIAP"
+    updateAllFromGiapBtn: document.getElementById('update-all-from-giap-btn'),
+    updateAllGiapModal: document.getElementById('update-all-giap-modal'),
+    updateAllModalBody: document.getElementById('update-all-modal-body'),
+    updateAllLoading: document.getElementById('update-all-loading'),
+    updateAllList: document.getElementById('update-all-list'),
+    updateAllConfirmBtn: document.getElementById('update-all-confirm-btn'),
+    // FIM DA ALTERAÇÃO
 };
 
 // --- ESTADO LOCAL/TRANSITÓRIO DO ORQUESTRADOR ---
@@ -88,11 +98,14 @@ async function loadData(forceRefresh = false) {
     ]);
 
     // Cria os mapas para acesso rápido (essencial para as abas)
-    const giapMapAllItems = new Map(giapInventory.map(item => [item['TOMBAMENTO']?.trim(), item]));
+    // INÍCIO DA ALTERAÇÃO: Usar normalizeTombo para criar os mapas
+    const giapMapAllItems = new Map(giapInventory.map(item => [normalizeTombo(item['TOMBAMENTO']), item]));
     const giapMap = new Map(giapInventory
         .filter(item => normalizeStr(item.Status).includes(normalizeStr('Disponível')))
-        .map(item => [item['TOMBAMENTO']?.trim(), item])
+        .map(item => [normalizeTombo(item['TOMBAMENTO']), item])
     );
+    // FIM DA ALTERAÇÃO
+    
     const normalizedSystemUnits = new Map();
     fullInventory.forEach(item => {
         if (item.Unidade) {
@@ -155,11 +168,18 @@ function updateUIFromState(state) {
  */
 function openSyncModal(item) {
     const { giapMapAllItems } = getState();
-    const tombo = item.Tombamento?.trim();
+    // INÍCIO DA ALTERAÇÃO: Usar normalizeTombo para o lookup
+    const tombo = normalizeTombo(item.Tombamento);
+    // FIM DA ALTERAÇÃO
     const giapItem = tombo ? giapMapAllItems.get(tombo) : null;
 
     if (!giapItem) {
-        return showNotification(`Item ${tombo} não encontrado na planilha GIAP.`, 'warning');
+        // INÍCIO DA ALTERAÇÃO: Lógica de sugestão (ainda não implementada)
+        // Por enquanto, apenas informamos que não foi encontrado.
+        // A lógica de "sugestão" (1403 vs 14032) é complexa (Levenshtein) e não foi implementada.
+        // A lógica de `014032` vs `14032` JÁ ESTÁ FUNCIONANDO devido à mudança no `loadData`.
+        // FIM DA ALTERAÇÃO
+        return showNotification(`Item ${item.Tombamento} (normalizado para ${tombo}) não encontrado na planilha GIAP.`, 'warning');
     }
     
     document.getElementById('sync-item-tombo').textContent = tombo;
@@ -178,7 +198,7 @@ function openSyncModal(item) {
 /**
  * Lida com a confirmação da sincronização no modal.
  * @param {string} id - ID do item no Firestore.
- * @param {string} tombo - Tombo do item.
+ * @param {string} tombo - Tombo do item (já normalizado).
  * @param {boolean} updateDesc - Se deve atualizar a descrição com a do GIAP.
  */
 async function confirmSyncAction(id, tombo, updateDesc) {
@@ -191,6 +211,14 @@ async function confirmSyncAction(id, tombo, updateDesc) {
     const changes = {
         Fornecedor: giapItem['Nome Fornecedor'] || '',
         NF: giapItem['NF'] || '',
+        // INÍCIO DA ALTERAÇÃO: Atualiza todos os campos solicitados
+        Cadastro: giapItem['Cadastro'] || '',
+        'Tipo Entrada': giapItem['Tipo Entrada'] || '',
+        Unidade_Planilha: giapItem['Unidade'] || '', // Salva a unidade original da planilha
+        'Valor NF': giapItem['Valor NF'] || '',
+        Espécie: giapItem['Espécie'] || '',
+        Status_Planilha: giapItem['Status'] || '', // Salva o status original da planilha
+        // FIM DA ALTERAÇÃO
         Observação: updateDesc ? `Descrição atualizada do GIAP. | ${giapItem.Unidade}` : `Meta-dados atualizados. | ${giapItem.Unidade}`,
         updatedAt: serverT()
     };
@@ -231,6 +259,162 @@ function renderGiapInventoryTable(giapInventory) {
     `).join('');
 }
 
+
+// --- INÍCIO DA ALTERAÇÃO: Funções do Novo Modal "Atualizar do GIAP" ---
+
+/**
+ * Manipulador de clique para o botão "Atualizar do GIAP".
+ * Inicia a verificação e abre o modal.
+ */
+async function handleUpdateAllFromGiap() {
+    DOM.updateAllGiapModal.classList.remove('hidden');
+    DOM.updateAllList.classList.add('hidden');
+    DOM.updateAllLoading.classList.remove('hidden');
+    DOM.updateAllConfirmBtn.disabled = true;
+
+    const { patrimonioFullList, giapMapAllItems } = getState();
+    const itemsToReview = [];
+
+    patrimonioFullList.forEach(item => {
+        const normalizedTombo = normalizeTombo(item.Tombamento);
+        if (!normalizedTombo || normalizedTombo === 's/t') {
+            return; // Ignora S/T
+        }
+
+        const giapItem = giapMapAllItems.get(normalizedTombo);
+
+        if (giapItem) {
+            const giapDesc = giapItem.Descrição || giapItem.Espécie;
+            // Verifica se a descrição é diferente
+            if (normalizeStr(item.Descrição) !== normalizeStr(giapDesc)) {
+                itemsToReview.push({ item, giapItem, status: 'name-change' });
+            }
+        } else {
+            itemsToReview.push({ item, status: 'not-found' });
+        }
+    });
+
+    renderUpdateAllList(itemsToReview);
+    DOM.updateAllLoading.classList.add('hidden');
+    DOM.updateAllList.classList.remove('hidden');
+    DOM.updateAllConfirmBtn.disabled = itemsToReview.length === 0;
+}
+
+/**
+ * Renderiza a lista de itens para revisão no modal.
+ * @param {Array<object>} itemsToReview - Itens para exibir no modal.
+ */
+function renderUpdateAllList(itemsToReview) {
+    if (itemsToReview.length === 0) {
+        DOM.updateAllList.innerHTML = `<p class="text-center text-green-600 font-semibold p-4">Parabéns! Todos os itens com tombamento parecem estar sincronizados com o GIAP.</p>`;
+        return;
+    }
+
+    const notFoundHtml = itemsToReview
+        .filter(r => r.status === 'not-found')
+        .map(r => `
+            <div class="p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+                <p class="font-semibold text-red-800">Não Encontrado no GIAP</p>
+                <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
+                <p class="text-sm"><strong>Descrição:</strong> ${escapeHtml(r.item.Descrição)}</p>
+            </div>
+        `).join('');
+
+    const nameChangeHtml = itemsToReview
+        .filter(r => r.status === 'name-change')
+        .map(r => `
+            <div class="p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded-r-lg">
+                <p class="font-semibold text-yellow-800">Divergência na Descrição</p>
+                <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
+                <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
+                    <div>
+                        <p class="font-medium">Descrição Atual no Sistema:</p>
+                        <p class="p-2 bg-white rounded border">${escapeHtml(r.item.Descrição)}</p>
+                    </div>
+                     <div>
+                        <p class="font-medium">Descrição na Planilha GIAP:</p>
+                        <p class="p-2 bg-white rounded border">${escapeHtml(r.giapItem.Descrição || r.giapItem.Espécie)}</p>
+                    </div>
+                </div>
+                <div class="mt-2">
+                    <label class="font-medium text-sm">Ação:</label>
+                    <select class="update-choice w-full p-2 border rounded-lg bg-white" data-id="${r.item.id}">
+                        <option value="keep" selected>Manter Nome Atual (e não atualizar outros dados)</option>
+                        <option value="update">Atualizar para Nome do GIAP (e todos os outros dados)</option>
+                    </select>
+                </div>
+            </div>
+        `).join('');
+
+    DOM.updateAllList.innerHTML = `
+        ${nameChangeHtml ? `<div><h4 class="text-lg font-semibold mb-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
+        ${notFoundHtml ? `<div class="mt-6"><h4 class="text-lg font-semibold mb-2">Itens Não Encontrados</h4><div class="space-y-3">${notFoundHtml}</div></div>` : ''}
+    `;
+}
+
+/**
+ * Manipulador de clique para o botão "Confirmar" do novo modal.
+ * Salva as alterações em lote.
+ */
+async function handleUpdateAllConfirm() {
+    const { giapMapAllItems, patrimonioFullList } = getState();
+    const selects = DOM.updateAllList.querySelectorAll('select.update-choice');
+    if (selects.length === 0) {
+        showNotification('Nenhuma ação selecionada.', 'info');
+        DOM.updateAllGiapModal.classList.add('hidden');
+        return;
+    }
+
+    showOverlay('Atualizando itens em lote...');
+    const batch = writeBatch(db);
+    let updateCount = 0;
+
+    selects.forEach(select => {
+        const id = select.dataset.id;
+        const choice = select.value;
+
+        if (choice === 'update') {
+            const itemRef = doc(db, 'patrimonio', id);
+            const item = patrimonioFullList.find(i => i.id === id);
+            const giapItem = giapMapAllItems.get(normalizeTombo(item.Tombamento));
+            
+            if (giapItem) {
+                updateCount++;
+                batch.update(itemRef, {
+                    Descrição: giapItem.Descrição || giapItem.Espécie,
+                    Cadastro: giapItem.Cadastro || '',
+                    NF: giapItem.NF || '',
+                    'Nome Fornecedor': giapItem['Nome Fornecedor'] || '',
+                    'Tipo Entrada': giapItem['Tipo Entrada'] || '',
+                    Unidade_Planilha: giapItem.Unidade || '', // Salva a unidade original da planilha
+                    'Valor NF': giapItem['Valor NF'] || '',
+                    Espécie: giapItem.Espécie || '',
+                    Status_Planilha: giapItem.Status || '', // Salva o status original da planilha
+                    updatedAt: serverT()
+                });
+            }
+        }
+    });
+
+    if (updateCount === 0) {
+        hideOverlay();
+        showNotification('Nenhum item foi marcado para atualização.', 'info');
+        DOM.updateAllGiapModal.classList.add('hidden');
+        return;
+    }
+
+    try {
+        await batch.commit();
+        showNotification(`${updateCount} itens atualizados com sucesso! Recarregando...`, 'success');
+        DOM.updateAllGiapModal.classList.add('hidden');
+        loadData(true); // Força recarregamento completo
+    } catch (e) {
+        hideOverlay();
+        showNotification('Erro ao salvar atualizações em lote.', 'error');
+        console.error(e);
+    }
+}
+// FIM DA ALTERAÇÃO
 
 // --- LISTENERS E INICIALIZAÇÃO ---
 
@@ -363,6 +547,18 @@ function setupListeners() {
             e.target.closest('.modal')?.classList.add('hidden'); 
         } 
     });
+
+    // --- INÍCIO DA ALTERAÇÃO: Listeners do Novo Modal "Atualizar do GIAP" ---
+    DOM.updateAllFromGiapBtn.addEventListener('click', handleUpdateAllFromGiap);
+    DOM.updateAllConfirmBtn.addEventListener('click', handleUpdateAllConfirm);
+    
+    // Fechar o novo modal
+    DOM.updateAllGiapModal.addEventListener('click', (e) => {
+        if (e.target.matches('.js-close-modal-update-all') || e.target.matches('.modal-overlay')) {
+            DOM.updateAllGiapModal.classList.add('hidden');
+        }
+    });
+    // FIM DA ALTERAÇÃO
 }
 
 function init() {
@@ -371,4 +567,3 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
-
