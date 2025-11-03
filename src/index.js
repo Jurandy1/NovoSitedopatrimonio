@@ -46,6 +46,11 @@ const DOM = {
     loginBtn: document.getElementById('btn-login'),
     loginBtnText: document.getElementById('login-btn-text'),
     loginBtnSpinner: document.getElementById('login-btn-spinner'),
+    // NOVOS ELEMENTOS DOM PARA FILTROS DE NF (usados no index.html)
+    nfSearchIndex: document.getElementById('nf-search-index'),
+    nfItemSearchIndex: document.getElementById('nf-item-search-index'),
+    nfTipoEntradaIndex: document.getElementById('nf-tipo-entrada-index'),
+    clearFiltersNfIndex: document.getElementById('clear-filters-nf-index'),
 };
 
 
@@ -133,11 +138,15 @@ function updateUIFromState(state) {
         populateFilters(state.patrimonioFullList);
         applyPatrimonioFiltersAndRender();
         
-        // CORREÇÃO:
-        // O painel do dashboard não tem a classe 'active', ele apenas não tem a classe 'hidden'.
-        // Esta verificação agora é correta e garante que o dashboard seja renderizado no carregamento inicial.
+        // CORREÇÃO 1: Garante que o dashboard seja renderizado no carregamento inicial.
         if (!document.getElementById('content-dashboard').classList.contains('hidden')) {
              renderDashboard(state.patrimonioFullList);
+        }
+        
+        // CORREÇÃO 2: Renderiza Notas Fiscais APENAS SE ESTIVER LOGADO e dados carregados.
+        // Isso cobre o caso em que o usuário já estava logado e a página é carregada.
+        if (state.isLoggedIn && state.giapInventory.length > 0 && !document.getElementById('content-notas').classList.contains('hidden')) {
+             renderNfList(processNfData(state.giapInventory), state.patrimonioFullList);
         }
     }
 
@@ -321,19 +330,43 @@ function processNfData(giapInventory) {
     }, {});
 }
 
+/**
+ * CORREÇÃO: Função de renderização das Notas Fiscais adaptada para usar os filtros do DOM.
+ */
 function renderNfList(processedNfData, patrimonioFullList) {
     const container = document.getElementById('lista-notas');
     if (!container) return;
     container.innerHTML = '';
-    if (Object.keys(processedNfData).length === 0) return; 
-
+    
+    const { nfSearchIndex, nfItemSearchIndex, nfTipoEntradaIndex } = DOM;
+    
     const tomboMap = new Map(patrimonioFullList.map(item => [item.Tombamento?.trim(), item]));
     
-    // Simplificado: usando apenas busca básica para manter a concisão no módulo principal.
-    const nfSearchTerm = (document.getElementById('nf-search-index')?.value || '').toLowerCase();
-    
+    // Filtros
+    const nfSearchTerm = normalizeStr(nfSearchIndex.value);
+    const itemSearchTerm = normalizeStr(nfItemSearchIndex.value);
+    const tipoEntrada = normalizeStr(nfTipoEntradaIndex.value);
+
     const filteredNfs = Object.keys(processedNfData).filter(nf => {
-        if (nfSearchTerm && !nf.toLowerCase().includes(nfSearchTerm)) return false;
+        const nfGroup = processedNfData[nf];
+
+        // Filtro por Número da NF
+        if (nfSearchTerm && !normalizeStr(nf).includes(nfSearchTerm)) return false;
+        
+        // Filtro por Tipo de Entrada
+        if (tipoEntrada && normalizeStr(nfGroup.tipoEntrada) !== tipoEntrada) return false;
+
+        // Filtro por Item (Descrição/Espécie)
+        if (itemSearchTerm) {
+            const itemMatch = nfGroup.items.some(item => 
+                normalizeStr(item.Descrição).includes(itemSearchTerm) || 
+                normalizeStr(item.Espécie).includes(itemSearchTerm)
+            );
+            if (!itemMatch) return false;
+        }
+        
+        // TODO: Adicionar filtro por fornecedor, status e datas
+        
         return true;
     });
 
@@ -342,8 +375,8 @@ function renderNfList(processedNfData, patrimonioFullList) {
         return;
     }
     
-    // Renderização simplificada
-    filteredNfs.forEach(nf => {
+    // Renderização simplificada (limitando a 100 NFs para performance)
+    filteredNfs.slice(0, 100).forEach(nf => {
         const nfGroup = processedNfData[nf];
         const nfDetails = document.createElement('details');
         nfDetails.className = 'bg-white rounded-lg shadow-sm border mb-3';
@@ -401,14 +434,16 @@ function getFirebaseAuthErrorMessage(errorCode) {
 
 function setupListeners() {
     const state = getState();
+    
     // Auth Listener
     addAuthListener(async user => {
         const isLoggedIn = !!user;
         const historicoFullList = isLoggedIn ? await loadHistory() : [];
         setState({ isLoggedIn, user, historicoFullList, authReady: true });
-        if (isLoggedIn && state.initialLoadComplete) {
-            // Se logou depois de carregar os dados, renderiza as notas
-            renderNfList(processNfData(state.giapInventory), state.patrimonioFullList);
+        
+        // CORREÇÃO 3: Se logou AGORA, e os dados já estão carregados, renderiza as notas.
+        if (isLoggedIn && state.initialLoadComplete && document.getElementById('content-notas').classList.contains('active')) {
+             renderNfList(processNfData(getState().giapInventory), getState().patrimonioFullList);
         }
     });
 
@@ -471,9 +506,15 @@ function setupListeners() {
         const tabName = e.currentTarget.dataset.tab;
         DOM.navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabName));
         DOM.contentPanes.forEach(pane => pane.classList.toggle('hidden', pane.id !== `content-${tabName}`));
+        
         if (tabName === 'dashboard' && state.patrimonioFullList.length > 0) renderDashboard(state.patrimonioFullList);
         if (tabName === 'historico' && state.isLoggedIn) renderHistory(state.historicoFullList);
-        if (tabName === 'notas' && state.isLoggedIn) renderNfList(processNfData(state.giapInventory), state.patrimonioFullList);
+        
+        // CORREÇÃO 4: Renderiza Notas Fiscais ao clicar na aba 'notas'
+        if (tabName === 'notas' && getState().isLoggedIn && getState().giapInventory.length > 0) {
+            // Certifica-se de que a lista é renderizada quando a aba é ativada
+            renderNfList(processNfData(getState().giapInventory), getState().patrimonioFullList);
+        }
     }));
 
     // Forçar Atualização
@@ -486,12 +527,23 @@ function setupListeners() {
         } 
     });
 
-    // Filtros de Notas Fiscais
-    const debouncedRenderNf = debounce(() => renderNfList(processNfData(state.giapInventory), state.patrimonioFullList), 300);
-    document.getElementById('nf-search-index').addEventListener('input', debouncedRenderNf);
-    document.getElementById('clear-filters-nf-index').addEventListener('click', () => {
-        document.getElementById('nf-search-index').value = '';
-        renderNfList(processNfData(state.giapInventory), state.patrimonioFullList);
+    // CORREÇÃO 5: Listeners de Filtros de Notas Fiscais
+    const debouncedRenderNf = debounce(() => {
+        if (getState().isLoggedIn && getState().giapInventory.length > 0) {
+            renderNfList(processNfData(getState().giapInventory), getState().patrimonioFullList);
+        }
+    }, 300);
+    
+    if(DOM.nfSearchIndex) DOM.nfSearchIndex.addEventListener('input', debouncedRenderNf);
+    if(DOM.nfItemSearchIndex) DOM.nfItemSearchIndex.addEventListener('input', debouncedRenderNf);
+    if(DOM.nfTipoEntradaIndex) DOM.nfTipoEntradaIndex.addEventListener('change', debouncedRenderNf);
+    // Adicionar listeners para outros filtros de NF (fornecedor, datas) se forem implementados no HTML
+
+    if(DOM.clearFiltersNfIndex) DOM.clearFiltersNfIndex.addEventListener('click', () => {
+        DOM.nfSearchIndex.value = '';
+        if(DOM.nfItemSearchIndex) DOM.nfItemSearchIndex.value = '';
+        if(DOM.nfTipoEntradaIndex) DOM.nfTipoEntradaIndex.value = '';
+        debouncedRenderNf();
     });
 }
 
