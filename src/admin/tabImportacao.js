@@ -513,10 +513,14 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
                 actionHtml = `
-                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
-                        <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
-                        <option value="ignore">Ignorar Linha</option>
-                    </select>
+                    <div class="space-y-1">
+                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
+                            <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
+                            <option value="ignore">Ignorar Linha</option>
+                        </select>
+                        <!-- BOTÃO DE LIGAÇÃO MANUAL PARA ITENS NÃO ENCONTRADOS -->
+                        <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
+                    </div>
                 `;
 
                 isCheckboxDisabled = false; // Permite seleção em massa para criar/ignorar
@@ -586,12 +590,13 @@ function openManualLinkModal(rowIndex) {
     // 2. Preenche o nome da unidade
     DOM_IMPORT.manualLinkUnitName.textContent = systemUnitName;
 
-    // 3. Filtra e preenche o select com itens do sistema (Apenas itens numerados)
+    // 3. Filtra e preenche o select com itens do sistema (Apenas itens S/T para ligação)
     const systemItems = patrimonioFullList
         .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName))
         .filter(i => {
             const tombo = normalizeTombo(i.Tombamento);
-            return tombo && tombo !== 's/t' && !i.isPermuta;
+            // CORREÇÃO ESSENCIAL: Mostrar APENAS S/T (Tombo vazio ou 's/t')
+            return (tombo === 's/t' || tombo === '') && !i.isPermuta;
         })
         .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
     
@@ -637,7 +642,6 @@ function confirmManualLink() {
     selPastedItemIndex = null;
 
     // Re-renderiza a lista de preview
-    // A linha que era "Não Encontrado" (vermelha) agora será "Forte" (verde)
     renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
     showNotification('Item ligado manualmente. A linha foi movida para "Atualizar".', 'success');
 }
