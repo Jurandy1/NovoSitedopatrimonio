@@ -1,6 +1,9 @@
 /**
  * /src/admin/tabImportacao.js
  * Lógica da aba "Importação e Substituição" (content-importacao).
+ * * Lógica principal atualizada: Focar em ligar TOMBO da planilha com S/T do sistema 
+ * através de Match RÍGIDO (Local + Estado + Nome Similar). 
+ * Qualquer falha resulta em "Criar Novo Item".
  */
 
 // INÍCIO DA ALTERAÇÃO: Importa 'updateDoc' e a função de similaridade
@@ -305,7 +308,7 @@ function processUnitMappingAndLoadItems() {
         
         // --- FILTRO DE SAÍDA RÍGIDO (REQUISITO) ---
         // Apenas itens que deram MATCH RÍGIDO (score 1.0 ou 0.95) ou SOBRANDO (match === null)
-        if (match === null && reason.includes('Tombo Não Encontrado')) {
+        if (match === null && reason.includes('Tombo Não Encontrado no Sistema')) {
              // Caso Sobrando (Vermelho) - Permite passar para ação de criação
              const comparisonRow = { 
                 pastedItem, 
@@ -344,9 +347,9 @@ function processUnitMappingAndLoadItems() {
 }
 
 
-// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo EXATO OU Match RÍGIDO
+// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo Exato OU Match RÍGIDO (S/T)
 /**
- * Encontra a melhor correspondência no inventário numerado por Tombo Exato ou Match Rígido.
+ * Encontra a melhor correspondência para a planilha: Tombo Exato OU Match Rígido (S/T).
  */
 function findBestMatch(pastedItem, itemsPool) {
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
@@ -354,27 +357,29 @@ function findBestMatch(pastedItem, itemsPool) {
     const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
     const pastedEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
     
-    // --- 1. Match: Tombo Exato ---
+    // --- 1. Busca Preliminar: Item Tombado (Tombo Exato) ---
+    // Se o Tombo da PLANILHA já existe no sistema, atualiza AQUELE item. (PRIORIDADE MÁXIMA)
     if (pastedTombo && pastedTombo !== 's/t') {
         const exactTomboMatch = itemsPool.find(item => normalizeTombo(item.Tombamento) === pastedTombo);
         if (exactTomboMatch) {
+            // Se achou pelo Tombo, o match é 1.0. 
             return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato' };
         }
     }
     
-    // Filtro de candidatos: Apenas itens numerados que não são permuta
-    const numberedCandidates = itemsPool.filter(item => {
+    // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
+    const stCandidates = itemsPool.filter(item => {
         const tombo = normalizeTombo(item.Tombamento);
-        return tombo && tombo !== 's/t' && !item.isPermuta;
+        return tombo === 's/t' || tombo === '';
     });
 
-    if (numberedCandidates.length === 0) {
-        // Se não houver Tombo Exato e nem candidatos numerados para Match Rigoroso, é Sobrando.
+    if (stCandidates.length === 0) {
+        // Se não achou por Tombo Exato E não há itens S/T para ligar, é Sobrando.
         return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
     }
 
-    // --- 2. Match: Rígido (Local + Estado + Nome Similar) ---
-    for (const systemItem of numberedCandidates) {
+    // --- 2. Match: Rígido (Local + Estado + Nome Similar) em CANDIDATOS S/T ---
+    for (const systemItem of stCandidates) {
         const systemDesc = normalizeStr(systemItem.Descrição);
         const systemLocal = normalizeStr(systemItem.Localização);
         const systemEstado = normalizeEstadoConservacao(systemItem.Estado);
@@ -384,14 +389,16 @@ function findBestMatch(pastedItem, itemsPool) {
             continue; // Falha no filtro rigoroso
         }
 
-        // Requisito: Nome QUASE IGUAL (similaridade alta)
+        // Requisito: Nome QUASE IGUAL (similaridade alta > 0.9)
         const nameScore = calculateSimilarity(pastedDesc, systemDesc);
         if (nameScore > 0.9) { 
-            return { match: systemItem, score: 0.95, reason: 'Match Rigoroso' }; // Match Forte
+            // Match encontrado! Este item S/T será atualizado com o Tombo da planilha.
+            return { match: systemItem, score: 0.95, reason: 'Match Rigoroso em S/T' }; 
         }
     }
     
     // --- 3. Falha: Sobrando ---
+    // Falhou na busca por Tombo Exato E na busca por Match Rígido em S/T.
     return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
 // FIM DA ALTERAÇÃO
@@ -482,12 +489,16 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             if (bestMatch) {
                 // Correspondência Forte (Verde - Score 1.0 ou 0.95)
                 rowClass = 'bg-green-50';
+                
+                // MENSAGEM: Indica se foi por Tombo Exato ou Match Rígido
+                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rígido (Local/Estado)';
+                
                 systemHtml = `
                     <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
                     <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
                     <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
                     <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
-                    <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+                    <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Motivo: ${matchReason}</p>
                 `;
                 actionHtml = `
                     <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
