@@ -194,8 +194,15 @@
     <!-- MODAIS -->
     <!-- MODAL DE LOGIN (CORRIGIDO E RESPONSIVO) -->
     <div id="login-modal" class="modal fixed inset-0 z-[60] flex items-center justify-center p-4 hidden">
-        <div class="modal-overlay absolute inset-0 bg-black/60 opacity-0"></div>
-        <div class="modal-container bg-white w-full max-w-md mx-auto rounded-lg shadow-2xl flex flex-col transform scale-95 opacity-0">
+        <!-- 
+          CORREÇÃO: Removido 'opacity-0' para que o overlay seja controlado apenas pela classe 'hidden' do pai.
+        -->
+        <div class="modal-overlay absolute inset-0 bg-black/60"></div>
+        <!-- 
+          CORREÇÃO: Removido 'opacity-0' para que o modal seja controlado pela classe 'hidden' do pai.
+          Mantido 'transform scale-95' para o efeito de "pop".
+        -->
+        <div class="modal-container bg-white w-full max-w-md mx-auto rounded-lg shadow-2xl flex flex-col transform scale-95">
             <form id="login-form">
                 <div class="flex items-center justify-between p-5 border-b">
                     <h3 class="text-xl font-semibold text-slate-800">Acesso Restrito</h3>
