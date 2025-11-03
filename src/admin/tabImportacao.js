@@ -492,7 +492,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
                     <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
                     <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
-                    <p><strong>Origem Atual:</strong> ${escapeHtml(bestMatch['Origem da Doação'] || 'N/A')}</p>
+                    <p><strong>Origem Atual:</strong> ${escapeHtml(bestMatch['Origem da Doação'] || 'Próprio/N/A')}</p>
                     <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Motivo: ${matchReason}</p>
                 `;
                 actionHtml = `
@@ -638,12 +638,14 @@ function openManualLinkModal(rowIndex) {
 
     
     // 4. Preenche o select com a Localização e o Estado (ATUALIZADO)
+    // ATUALIZAÇÃO AQUI: Adicionando a Origem do Sistema nas opções do dropdown
     DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item --</option>' +
         systemItems.map(item => `
             <option value="${item.id}">
                 ${escapeHtml(item.Descrição)} 
                 (Local: ${escapeHtml(item.Localização || 'N/I')} | 
-                Estado: ${escapeHtml(item.Estado || 'N/D')})
+                Estado: ${escapeHtml(item.Estado || 'N/D')} |
+                Origem: ${escapeHtml(item['Origem da Doação'] || 'Próprio/N/A')})
             </option>
         `).join('');
 
