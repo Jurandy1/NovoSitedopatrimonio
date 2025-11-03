@@ -14,7 +14,7 @@ const DOM_CONC = {
     conciliarFilterUnidade: document.getElementById('filter-unidade'),
     loadConciliarBtn: document.getElementById('load-conciliar'),
     unitReconciledWarning: document.getElementById('unit-reconciled-warning'),
-    giapListUnitName: document.getElementById('giap-list-unit-name'),
+    // giapListUnitName: document.getElementById('giap-list-unit-name'), // Removido
     
     // Sub-aba Unidade
     systemListFilter: document.getElementById('system-list-filter'),
@@ -266,16 +266,28 @@ function renderList(containerId, arr, keyField, primaryLabelField, context) {
 
         let detailsHtml = '';
         if (containerId.includes('system-list')) {
-            // Layout para item do Sistema (S/T)
+            // MELHORIA 2: Layout para item do Sistema (S/T) com Estado e Obs
+            const estado = escapeHtml(item.Estado || 'N/D');
+            const estadoClass = estado === 'Novo' ? 'badge-green' : estado === 'Bom' ? 'badge-blue' : estado === 'Avariado' ? 'badge-red' : 'badge-yellow';
+            
             detailsHtml = `
                 <p class="font-semibold">${escapeHtml(item[primaryLabelField])}</p>
                 <p class="text-xs text-slate-500">${escapeHtml(item.Localização) || 'Sem local'}</p>
+                <div class="mt-1">
+                    <span class="badge ${estadoClass}">${estado}</span>
+                </div>
+                ${item.Observação ? `<p class="text-xs text-slate-600 mt-1 truncate" title="${escapeHtml(item.Observação)}">Obs: ${escapeHtml(item.Observação)}</p>` : ''}
             `;
         } else {
-            // Layout para item do GIAP (Tombo)
+            // MELHORIA 1: Layout para item do GIAP (Tombo) com mais campos
             detailsHtml = `
                 <p class="font-semibold">${escapeHtml(item.Descrição || item.Espécie)}</p>
                 <p class="text-xs text-slate-500">Tombo: <span class="font-mono">${escapeHtml(item.TOMBAMENTO)}</span></p>
+                <div class="mt-2 text-xs text-slate-600 space-y-1 border-t pt-1">
+                    <p><strong>Cadastro:</strong> ${escapeHtml(item.Cadastro || 'N/A')}</p>
+                    <p><strong>Fornecedor:</strong> ${escapeHtml(item['Nome Fornecedor'] || 'N/A')}</p>
+                    <p><strong>Valor:</strong> ${escapeHtml(item['Valor NF'] || 'N/A')} | <strong>Entrada:</strong> ${escapeHtml(item['Tipo Entrada'] || 'N/A')}</p>
+                </div>
             `;
             if (context === 'sobras') {
                  detailsHtml += `<p class="text-xs text-blue-600 font-semibold mt-1">Unidade GIAP: ${escapeHtml(item.Unidade || 'N/A')}</p>`;
@@ -579,8 +591,8 @@ export function setupConciliarListeners(reloadDataCallback) {
              DOM_CONC.unitReconciledWarning.textContent = 'Atenção: Esta unidade já foi marcada como "Concluída". Os itens restantes são sobras ou ainda não foram vinculados. Use a aba "Conciliar com Sobras".';
         }
 
-        const giapUnitsForSystemUnit = (unitMapping && unitMapping[selectedUnit]) ? unitMapping[selectedUnit] : [];
-        DOM_CONC.giapListUnitName.textContent = giapUnitsForSystemUnit.join(', ') || 'Nenhuma unidade GIAP ligada';
+        // const giapUnitsForSystemUnit = (unitMapping && unitMapping[selectedUnit]) ? unitMapping[selectedUnit] : []; // Removido
+        // DOM_CONC.giapListUnitName.textContent = giapUnitsForSystemUnit.join(', ') || 'Nenhuma unidade GIAP ligada'; // Removido
         
         renderConciliationLists('unidade');
             
