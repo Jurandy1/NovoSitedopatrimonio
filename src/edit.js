@@ -32,9 +32,9 @@ const DOM = {
     navButtons: document.querySelectorAll('#edit-nav .nav-btn'),
     contentPanes: document.querySelectorAll('main > div[id^="content-"]'),
     
- // --- IMPORTS DE SERVIÇOS E ESTADO ---
--import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT } from './services/firebase.js';
-+import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
+    // --- IMPORTS DE SERVIÇOS E ESTADO ---
+    import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
+     import { loadGiapInventory } from './services/giapService.js';
  import { loadGiapInventory } from './services/giapService.js';
     subTabNavConciliar: document.querySelectorAll('#content-conciliar .sub-nav-btn'),
     subTabNavImportacao: document.querySelectorAll('#content-importacao .sub-nav-btn'),
