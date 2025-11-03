@@ -5,6 +5,7 @@
  */
 
 // ✅ Importação corrigida do Dexie — versão estável e compatível com ESM
+// Usamos o esm.sh para garantir que o Dexie seja carregado como um módulo.
 import Dexie from "https://esm.sh/dexie@3.2.4";
 
 // Duração do cache local (6 horas)
