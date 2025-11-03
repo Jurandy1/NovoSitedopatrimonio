@@ -6,19 +6,14 @@
     <title>Auditoria e Edição - Sistema de Patrimônio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
-    
-    <!-- 
-      CORREÇÃO: Removida a tag <script> do Dexie.js daqui. 
-      Ele agora é importado corretamente como um módulo dentro de 'src/services/cache.js'.
-      Isso evita o conflito e o erro de sintaxe.
-    -->
+    <!-- Dexie.js for IndexedDB Cache -->
+    <!-- REMOVIDO: A importação do Dexie.js é feita via módulo em src/services/cache.js para evitar conflitos de escopo. -->
     <!-- <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script> -->
-    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Estilo CSS Externo (Assumindo que style.css está na raiz) -->
+    <!-- Estilo CSS Externo -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="text-slate-700 antialiased">
@@ -364,7 +359,7 @@
                             <label for="replace-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui</label>
                             <p class="text-xs text-slate-500 mb-2">As colunas devem estar na ordem: UNIDADE, ITEM, TOMBO, LOCAL, ESTADO DE CONSERVAÇÃO</p>
                             <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel e cole aqui..."></textarea>
-</div>
+                        </div>
                         <button id="preview-replace-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Dados</button>
 
                         <div id="replace-results" class="hidden mt-6 border-t pt-4">
@@ -551,8 +546,7 @@
         </main>
     </div>
     
-    <!-- Modals (Outros modais omitidos para brevidade, mas devem permanecer no HTML) -->
-
+    <!-- Modals -->
     <div id="sync-confirm-modal" class="modal fixed inset-0 z-[60] flex items-center justify-center p-4 hidden">
         <div class="modal-overlay absolute inset-0 bg-black/60"></div>
         <div class="modal-container bg-white w-full max-w-lg rounded-lg shadow-2xl flex flex-col transform scale-95">
@@ -678,11 +672,6 @@
     </div>
 
     <!-- Script da Página (Módulo) -->
-    <!-- 
-      CORREÇÃO: Adicionado ?v=1.2.2 para forçar o navegador a baixar a versão mais recente 
-      do script, resolvendo o erro de cache que estava causando o travamento.
-    -->
-    <script type="module" src="src/edit.js?v=1.2.2"></script>
+    <script type="module" src="src/edit.js"></script>
 </body>
 </html>
-
