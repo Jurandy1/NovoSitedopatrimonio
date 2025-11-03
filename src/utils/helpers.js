@@ -14,9 +14,7 @@ export function showNotification(message, type = 'info', duration = 3000) {
     notification.className = `notification-toast ${type}`;
     notification.textContent = message;
     document.body.appendChild(notification);
-
     setTimeout(() => notification.classList.add('show'), 10);
-
     setTimeout(() => {
         notification.classList.remove('show');
         setTimeout(() => notification.remove(), 500);
@@ -48,11 +46,10 @@ export function hideOverlay() {
 
 /**
  * Normaliza uma string (remove acentos, espaços extras e converte para minúsculas).
- * @param {string} str
+ * @param {string} str 
  * @returns {string}
  */
-export const normalizeStr = (str) =>
-    (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+export const normalizeStr = (str) => (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
 /**
  * Cria uma versão "debounced" de uma função (atrasa sua execução).
@@ -73,27 +70,16 @@ export const debounce = (func, delay) => {
  * @param {string} unsafe - A string a ser escapada.
  * @returns {string}
  */
-export const escapeHtml = (unsafe) =>
-    unsafe === undefined || unsafe === null
-        ? ''
-        : unsafe
-              .toString()
-              .replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;')
-              .replace(/'/g, '&#039;');
+export const escapeHtml = (unsafe) => (unsafe === undefined || unsafe === null) ? '' : unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 
 /**
  * Converte uma string de moeda brasileira (R$) para um número.
- * @param {string} value
+ * @param {string} value 
  * @returns {number}
  */
 export const parseCurrency = (value) => {
     if (typeof value !== 'string' || value.trim() === '') return 0;
-    return parseFloat(
-        value.replace('R$', '').replace(/\./g, '').replace(',', '.').trim()
-    ) || 0;
+    return parseFloat(value.replace('R$', '').replace(/\./g, '').replace(',', '.').trim()) || 0;
 };
 
 /**
@@ -115,7 +101,7 @@ export const normalizeTombo = (tombo) => {
 /**
  * Analisa o campo 'Estado e Origem da Doação' e separa as informações.
  * @param {string} texto - O texto do campo 'Estado e Origem da Doação'
- * @returns {{estado: string, origem: string}}
+ * @returns {{estado: string, origem: string}} 
  */
 export function parseEstadoEOrigem(texto) {
     const textoCru = (texto || '').trim();
@@ -125,88 +111,101 @@ export function parseEstadoEOrigem(texto) {
     let estadoFinal = 'Regular';
     let origemFinal = '';
 
+    // 1. Tenta extrair o Estado e o Resto
     for (const estado of validEstados) {
-        if (normalizeStr(textoCru).startsWith(normalizeStr(estado))) {
+        // Encontra o estado na string, case insensitive
+        const regex = new RegExp(`^${estado}\\s*(.*)$`, 'i');
+        const match = textoCru.match(regex);
+
+        if (match) {
             estadoFinal = estado;
-            let resto = textoCru.substring(estado.length).trim();
-
-            // Remove parênteses/colchetes e hífens que separam o estado da origem
-            if (
-                (resto.startsWith('(') && resto.endsWith(')')) ||
-                (resto.startsWith('[') && resto.endsWith(']'))
-            ) {
-                resto = resto.substring(1, resto.length - 1).trim();
-            } else if (resto.startsWith('-')) {
-                resto = resto.substring(1).trim();
-            }
-
-            if (resto) {
-                const restoNormalizado = normalizeStr(resto);
-                if (
-                    restoNormalizado.startsWith('doação estado ma') ||
-                    restoNormalizado.startsWith('doacao estado ma')
-                ) {
-                    origemFinal = 'Doação ESTADO MA';
-                } else if (
-                    restoNormalizado.startsWith('doação ma') ||
-                    restoNormalizado.startsWith('doacao ma')
-                ) {
-                    origemFinal = 'Doação MA';
-                } else if (
-                    restoNormalizado.startsWith('doação') ||
-                    restoNormalizado.startsWith('doacao')
-                ) {
-                    origemFinal = resto.replace(/^(doação|doacao)\s*/i, '').trim();
+            let resto = match[1].trim();
+            
+            // Tenta extrair qualquer coisa entre parênteses ou colchetes no restante do texto
+            const origemMatch = resto.match(/\(([^)]+)\)|\[([^\]]+)\]/);
+            
+            if (origemMatch) {
+                // Se encontrar parênteses/colchetes, usa o conteúdo como origem
+                let content = (origemMatch[1] || origemMatch[2]).trim();
+                
+                const normalizedContent = normalizeStr(content);
+                // Remove prefixos de doação comuns, mas mantém o resto para ser mais específico
+                if (normalizedContent.startsWith('doação') || normalizedContent.startsWith('doacao')) {
+                    origemFinal = content.replace(/^(doação|doacao)\s*/i, '').trim();
                 } else {
-                    origemFinal = resto.trim();
+                    origemFinal = content;
                 }
+                
+                // Se o que sobrou for vazio ou apenas 'MA'/'ESTADO MA', usa a forma padronizada
+                if (!origemFinal || normalizeStr(origemFinal) === 'ma') origemFinal = 'Doação MA';
+                if (normalizeStr(origemFinal) === 'estado ma' || normalizeStr(origemFinal) === 'estado') origemFinal = 'Doação ESTADO MA';
+
+            } else if (resto.startsWith('-')) {
+                // Se for um separador de hífen, usa o resto como origem
+                origemFinal = resto.substring(1).trim();
             }
+
             return { estado: estadoFinal, origem: origemFinal || '' };
         }
     }
-
-    // Se o texto é apenas o estado (ex: "Bom")
+    
+    // 2. Se o Estado não foi encontrado no início (ex: 'CIDADE OLIMPICA Armário em aço... Bom (Doação Estado MA)')
+    
+    // Tenta encontrar o Estado em qualquer lugar da string para extrair o resto como ORIGEM
     for (const estado of validEstados) {
-        if (normalizeStr(textoCru) === normalizeStr(estado)) {
-            return { estado: estado, origem: '' };
+        const normalizedTexto = normalizeStr(textoCru);
+        if (normalizedTexto.includes(normalizeStr(estado))) {
+            estadoFinal = estado;
+            
+            // Se o estado foi encontrado, tenta buscar a ORIGEM dentro de parênteses em qualquer lugar
+            const origemMatch = textoCru.match(/\(([^)]+)\)|\[([^\]]+)\]/);
+            if (origemMatch) {
+                let content = (origemMatch[1] || origemMatch[2]).trim();
+                
+                const normalizedContent = normalizeStr(content);
+                if (normalizedContent.startsWith('doação estado ma') || normalizedContent.startsWith('doacao estado ma')) {
+                    origemFinal = 'Doação ESTADO MA';
+                } else if (normalizedContent.startsWith('doação ma') || normalizedContent.startsWith('doacao ma')) {
+                    origemFinal = 'Doação MA';
+                } else if (normalizedContent.startsWith('doação') || normalizedContent.startsWith('doacao')) {
+                    origemFinal = content.replace(/^(doação|doacao)\s*/i, '').trim();
+                } else {
+                    origemFinal = content;
+                }
+
+                return { estado: estadoFinal, origem: origemFinal || '' };
+            }
         }
     }
-
-    // Se não for nenhum estado conhecido, assume Regular e o texto como origem
-    const normalized = normalizeStr(textoCru);
-    if (normalized.includes('doação estado ma') || normalized.includes('doacao estado ma')) {
-        origemFinal = 'Doação ESTADO MA';
-    } else if (normalized.includes('doação ma') || normalized.includes('doacao ma')) {
-        origemFinal = 'Doação MA';
-    } else if (normalized.includes('doação') || normalized.includes('doacao')) {
-        origemFinal = textoCru.replace(/^(doação|doacao)\s*/i, '').trim();
-    } else if (textoCru.includes('(') || textoCru.includes('[')) {
-        const match = textoCru.match(/\(([^)]+doação[^)]+)\)|\[([^\]]+doação[^\]]+)\]/i);
-        if (match) {
-            origemFinal = (match[1] || match[2])
-                .trim()
-                .replace(/^(doação|doacao)\s*/i, '')
-                .trim();
-        }
+    
+    // 3. Casos onde não há estado claro, mas há origem em parênteses
+    const origemMatch = textoCru.match(/\(([^)]+)\)|\[([^\]]+)\]/);
+    if (origemMatch) {
+         let content = (origemMatch[1] || origemMatch[2]).trim();
+         const normalizedContent = normalizeStr(content);
+         if (normalizedContent.includes('doação') || normalizedContent.includes('doacao')) {
+             origemFinal = content;
+             return { estado: 'Regular', origem: origemFinal };
+         }
     }
-
-    return { estado: 'Regular', origem: origemFinal || '' };
+    
+    // Se falhar em tudo, retorna o padrão
+    return { estado: 'Regular', origem: '' };
 }
 
 /**
- * Converte data em formato DD/MM/AAAA ou ISO (AAAA-MM-DD) para objeto Date.
- * @param {string} dateStr - Data no formato DD/MM/AAAA ou ISO.
+ * Converte data em formato DD/MM/AAAA para objeto Date.
+ * @param {string} dateStr - Data no formato DD/MM/AAAA.
  * @returns {Date}
  */
 export function parsePtBrDate(dateStr) {
-    if (!dateStr || typeof dateStr !== 'string') return new Date(0);
-
+    if (!dateStr || typeof dateStr !== 'string') return new Date(0); 
     const parts = dateStr.split('/');
     if (parts.length === 3) {
         return new Date(parts[2], parts[1] - 1, parts[0]);
     }
     const isoParts = dateStr.split('-');
-    if (isoParts.length === 3) {
+    if(isoParts.length === 3) {
         return new Date(isoParts[0], isoParts[1] - 1, isoParts[2]);
     }
     return new Date(0);
