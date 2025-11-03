@@ -8,6 +8,8 @@
 // CORREÇÃO: Adicionada a variável 'db' e removidos comandos duplicados
 import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
+// CORREÇÃO ESSENCIAL: Adicionando 'isCacheStale', 'loadFromCache', e 'updateLocalCache'
+import { isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js'; 
 // INÍCIO DA ALTERAÇÃO: Importar normalizeTombo
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from './utils/helpers.js';
 // FIM DA ALTERAÇÃO
@@ -44,6 +46,9 @@ const DOM = {
     updateAllList: document.getElementById('update-all-list'),
     updateAllConfirmBtn: document.getElementById('update-all-confirm-btn'),
     // FIM DA ALTERAÇÃO
+    
+    // Elementos do modal de Sincronização
+    syncConfirmModal: document.getElementById('sync-confirm-modal'),
 };
 
 // --- ESTADO LOCAL/TRANSITÓRIO DO ORQUESTRADOR ---
@@ -61,6 +66,7 @@ async function loadData(forceRefresh = false) {
     
     let [fullInventory, giapInventory] = [[], []];
     
+    // Linha 64 (Original): isCacheStale estava sendo chamado sem ser importado.
     const cacheStale = await isCacheStale();
 
     if (!forceRefresh && !cacheStale) {
@@ -500,8 +506,9 @@ function setupListeners() {
             return;
         }
 
+        // CORREÇÃO: Chama loadData() APENAS se estiver logado E o carregamento inicial ainda não foi concluído.
         if (isLoggedIn && !state.initialLoadComplete) {
-            loadData(false); // Inicia o carregamento de dados quando logado
+            loadData(false); 
         }
     }
     
