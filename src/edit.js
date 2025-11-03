@@ -9,7 +9,7 @@ import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMap
 import { loadGiapInventory } from './services/giapService.js';
 import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
 import { showNotification, showOverlay, hideOverlay } from './utils/helpers.js';
-import { subscribe, setState } from './state/globalStore.js';
+import { subscribe, setState, getState } from './state/globalStore.js';
 
 // --- IMPORTS DOS MÓDULOS DE ADMINISTRAÇÃO (A LÓGICA DAS ABAS) ---
 import { populateEditableInventoryTab, setupInventarioListeners } from './admin/tabInventario.js';
@@ -238,7 +238,21 @@ function setupListeners() {
     addAuthListener(user => {
         const isLoggedIn = !!user;
         setState({ isLoggedIn, user, authReady: true });
-        if (isLoggedIn && !getState().initialLoadComplete) {
+
+        // --- CORREÇÃO (Início) ---
+        // Adiciona uma trava de segurança para getState
+        if (typeof getState !== 'function') {
+            console.error("Auth callback: getState não está definida. Isso pode ser um erro de carregamento.");
+            return;
+        }
+        const state = getState();
+        if (!state) {
+            console.error("Auth callback: O estado global não está pronto.");
+            return;
+        }
+        // --- CORREÇÃO (Fim) ---
+
+        if (isLoggedIn && !state.initialLoadComplete) {
             loadData(false); // Inicia o carregamento de dados quando logado
         }
     });
@@ -258,7 +272,21 @@ function setupListeners() {
             if (tabName === 'transferencias') populatePendingTransfersTab(loadData);
             if (tabName === 'unidades') populateUnitMappingTab();
             if (tabName === 'notas_fiscais') populateNfTab();
-            if (tabName === 'giap') renderGiapInventoryTable(getState().giapInventory);
+
+            // --- CORREÇÃO (Início) ---
+            // Adiciona uma trava de segurança para getState
+            if (typeof getState !== 'function') {
+                console.error("Tab click: getState não está definida.");
+                return;
+            }
+            const state = getState();
+            if (!state) {
+                console.error("Tab click: O estado global não está pronto.");
+                return;
+            }
+            // --- CORREÇÃO (Fim) ---
+
+            if (tabName === 'giap') renderGiapInventoryTable(state.giapInventory);
 
             // Re-popula a aba de conciliação ao abrir
             if (tabName === 'conciliar') {
