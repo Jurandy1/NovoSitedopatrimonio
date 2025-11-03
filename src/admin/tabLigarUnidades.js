@@ -46,6 +46,16 @@ export function populateUnitMappingTab() {
  */
 function updateSystemUnitOptions() {
     const { patrimonioFullList, unitMapping, normalizedSystemUnits } = getState();
+    
+    // --- CORREÇÃO (Início) ---
+    // Adiciona uma trava de segurança para o caso da aba ser aberta antes dos dados carregarem
+    if (!normalizedSystemUnits) {
+        console.warn("updateSystemUnitOptions chamada antes do estado 'normalizedSystemUnits' estar pronto.");
+        DOM_MAP.mapSystemUnitSelect.innerHTML = '<option>Carregando dados...</option>';
+        return; 
+    }
+    // --- CORREÇÃO (Fim) ---
+
     const selectedType = DOM_MAP.mapFilterTipo.value;
     const linkedSystemUnits = Object.keys(unitMapping);
     
