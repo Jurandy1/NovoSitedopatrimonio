@@ -343,7 +343,8 @@ function renderUpdateAllList(itemsToReview) {
                     <div class="ml-3 flex-1">
                         <p class="font-semibold text-yellow-800">Divergência na Descrição</p>
                         <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)} | <strong>Estado Atual:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
-                        <p class="text-xs"><strong>Espécie (GIAP):</strong> ${escapeHtml(r.giapItem.Espécie || 'N/A')} | <strong>Cadastro (GIAP):</strong> ${escapeHtml(r.giapItem.Cadastro || 'N/A')}</p>
+                        <p class="text-sm"><strong>Unidade Atual:</strong> <span class="font-bold text-gray-700">${escapeHtml(r.item.Unidade || 'N/A')}</span></p>
+                        <p class="text-xs"><strong>Unidade (GIAP):</strong> <span class="font-bold text-blue-700">${escapeHtml(r.giapItem.Unidade || 'N/A')}</span> | <strong>Espécie:</strong> ${escapeHtml(r.giapItem.Espécie || 'N/A')} | <strong>Cadastro:</strong> ${escapeHtml(r.giapItem.Cadastro || 'N/A')}</p>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">
                             <div>
                                 <p class="font-medium">Descrição Atual no Sistema:</p>
@@ -376,7 +377,7 @@ function renderUpdateAllList(itemsToReview) {
                     <input type="checkbox" class="update-all-checkbox mt-1 h-5 w-5" data-id="${escapeHtml(r.item.id)}">
                     <div class="ml-3 flex-1">
                         <p class="font-semibold text-red-800">Não Encontrado no GIAP</p>
-                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
+                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)} | <strong>Unidade Atual:</strong> <span class="font-bold text-red-700">${escapeHtml(r.item.Unidade || 'N/A')}</span></p>
                         <p class="text-sm"><strong>Descrição:</strong> ${escapeHtml(r.item.Descrição)} | <strong>Estado:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
                         <div class="mt-2">
                             <label class="font-medium text-sm">Ação:</label>
@@ -676,3 +677,6 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+
+
