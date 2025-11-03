@@ -1,8 +1,6 @@
-/**/**
- * src/edit.js
- * Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
- * Centraliza a lógica para todas as abas de administração (Edição, Mapeamento, Conciliação, etc.).
- */
+// src/edit.js
+// Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
+// Centraliza a lógica para todas as abas de administração (Edição, Mapeamento, Conciliação, etc.).
 
 import { addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
@@ -334,3 +332,6 @@ function init() {
     // Configura Listeners de Eventos
     setupListeners();
 }
+
+document.addEventListener('DOMContentLoaded', init);
+
