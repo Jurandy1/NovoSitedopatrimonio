@@ -5,7 +5,7 @@
 
 import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
-import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml } from '../utils/helpers.js';
+import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from '../utils/helpers.js';
 import { idb } from '../services/cache.js';
 
 const DOM_IMPORT = {
@@ -80,11 +80,13 @@ export function populateImportAndReplaceTab() {
  * @param {string} unitSelectId - ID do select de Unidade.
  */
 function setupUnitSelect(tipoSelectEl, unitSelectEl) {
-    const { patrimonioFullList } = getState();
+    // *** CORREÇÃO: patrimonioFullList removido deste escopo ***
     tipoSelectEl.addEventListener('change', () => {
+        // *** CORREÇÃO: patrimonioFullList é obtido de getState() AQUI DENTRO ***
+        const { patrimonioFullList } = getState();
         const selectedTipo = tipoSelectEl.value;
         if (!selectedTipo) {
-            unitSelectEl.innerHTML = '';
+            unitSelectEl.innerHTML = '<option value="">Selecione uma Unidade</option>'; // Limpa e adiciona a opção padrão
             unitSelectEl.disabled = true;
             return;
         }
@@ -105,8 +107,6 @@ function setupUnitSelect(tipoSelectEl, unitSelectEl) {
 // --- LISTENERS ---
 
 export function setupImportacaoListeners(reloadDataCallback) {
-    const { patrimonioFullList, giapMap } = getState();
-
     // 1. Setup para selects de unidade
     setupUnitSelect(DOM_IMPORT.massTransferTipo, DOM_IMPORT.massTransferUnit);
     setupUnitSelect(DOM_IMPORT.replaceTipo, DOM_IMPORT.replaceUnit);
@@ -114,6 +114,8 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
     // 2. Lógica de Importação em Massa
     DOM_IMPORT.massTransferSearchBtn.addEventListener('click', async () => {
+        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+        const { patrimonioFullList, giapMap } = getState();
         const tombos = DOM_IMPORT.massTransferTombos.value.split(/[,;\s\n]+/).map(t => normalizeTombo(t)).filter(t => t && t.toLowerCase() !== 's/t');
         const tipo = DOM_IMPORT.massTransferTipo.value;
         const unidade = DOM_IMPORT.massTransferUnit.value;
@@ -166,6 +168,8 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
     // Confirmação de Importação em Massa
     DOM_IMPORT.massTransferConfirmBtn.addEventListener('click', async () => {
+        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+        const { giapMap } = getState();
         const tipo = DOM_IMPORT.massTransferTipo.value;
         const unidade = DOM_IMPORT.massTransferUnit.value;
         
