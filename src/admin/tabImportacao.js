@@ -10,7 +10,7 @@
 import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc, updateDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
 // INÍCIO DA ALTERAÇÃO: Adiciona 'debounce'
-import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo, debounce } from '../utils/helpers.js';
+import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo, debounce, parseEstadoEOrigem } from '../utils/helpers.js';
 import { calculateSimilarity } from '../utils/similarity.js'; // Importa a função de similaridade
 import { idb } from '../services/cache.js';
 // FIM DA ALTERAÇÃO
@@ -21,24 +21,12 @@ import { idb } from '../services/cache.js';
  * @returns {string} - O estado padronizado (ex: "Avariado", "Bom")
  */
 const normalizeEstadoConservacao = (estadoStr) => {
-    // INÍCIO DA ALTERAÇÃO: Remove texto em parênteses ANTES de normalizar
-    const cleanStr = (estadoStr || '').split('(')[0].trim();
-    // FIM DA ALTERAÇÃO
-    
-    const normalized = normalizeStr(cleanStr);
-    
-    if (['avariado', 'avariada', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
-    if (normalized.startsWith('novo')) return 'Novo';
-    if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
-    if (normalized.startsWith('regular')) return 'Regular';
-    
-    if (normalized === '') return 'Regular'; // Se estiver vazio, assume Regular
-    return 'Regular'; // Padrão
+    // Usa a nova função utilitária
+    return parseEstadoEOrigem(estadoStr).estado;
 };
 
 /**
- * INÍCIO: Adiciona função para extrair origem da doação
- * Extrai informação de doação de colunas da planilha
+ * Extrai informação de doação da linha da planilha.
  * @param {object} item - O objeto da linha (com cabeçalhos normalizados)
  * @returns {string} - O texto da origem da doação, se encontrado.
  */
@@ -49,23 +37,21 @@ const extractOrigemDoacao = (item) => {
         return origemColuna.trim();
     }
     
-    // 2. Se não, verifica se "(DOAÇÃO)" está no estado de conservação
+    // 2. Tenta extrair da coluna de estado/descrição (como no exemplo do usuário)
     const estadoInput = item['estado de conservacao'] || item.estado || '';
-    const normalizedEstado = normalizeStr(estadoInput);
-    
-    if (normalizedEstado.includes('(doacao)')) {
-        return 'Doação'; // Retorna "Doação" genérico
+    if(estadoInput) {
+        const result = parseEstadoEOrigem(estadoInput);
+        if (result.origem) return result.origem;
     }
     
     // 3. Se não, verifica se "(DOAÇÃO)" está na descrição
     const descInput = item.descricao || item.item || '';
     if (normalizeStr(descInput).includes('(doacao)')) {
-        return 'Doação';
+        return 'Doação (na descrição)';
     }
 
     return ''; // Nenhum encontrado
 };
-// FIM: Adiciona função
 
 // INÍCIO DA ALTERAÇÃO: Estado local para a importação multi-unidade
 let multiUnitImportData = {
@@ -290,7 +276,8 @@ function processUnitMappingAndLoadItems() {
         // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO) ---
         // 1. Ignora se não tem Tombo Válido na planilha
         const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
-        if (!pastedTombo || pastedTombo.toLowerCase() === 's/t') {
+        // Adiciona a checagem de "Permuta"
+        if (!pastedTombo || pastedTombo.toLowerCase() === 's/t' || pastedTombo.toLowerCase().includes('permuta')) {
              return; 
         }
         // 2. Ignora se a unidade não foi mapeada ou foi ignorada
@@ -315,7 +302,8 @@ function processUnitMappingAndLoadItems() {
                 bestMatch: null, 
                 score: 0, 
                 systemUnitName, 
-                updateDescription: false
+                updateDescription: false,
+                pastedOrigem: extractOrigemDoacao(pastedItem) // Adiciona a Origem
             };
             multiUnitImportData.comparisonData.push(comparisonRow);
         } else if (match !== null) {
@@ -330,7 +318,8 @@ function processUnitMappingAndLoadItems() {
                 bestMatch: match, 
                 score, 
                 systemUnitName, 
-                updateDescription: false
+                updateDescription: false,
+                pastedOrigem: extractOrigemDoacao(pastedItem) // Adiciona a Origem
             };
             multiUnitImportData.comparisonData.push(comparisonRow);
         }
@@ -370,7 +359,8 @@ function findBestMatch(pastedItem, itemsPool) {
     // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
     const stCandidates = itemsPool.filter(item => {
         const tombo = normalizeTombo(item.Tombamento);
-        return tombo === 's/t' || tombo === '';
+        // Garante que só itens sem tombo ou S/T sejam considerados
+        return (tombo === 's/t' || tombo === '');
     });
 
     if (stCandidates.length === 0) {
@@ -452,7 +442,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         items.forEach((row) => {
             // Encontra o índice global do item para o data-row-index
             const index = comparisonData.indexOf(row);
-            const { pastedItem, bestMatch, score, systemUnitName } = row;
+            const { pastedItem, bestMatch, score, systemUnitName, pastedOrigem } = row;
 
             // --- Dados da Planilha ---
             const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
@@ -469,11 +459,15 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             const estadoHtml = fieldUpdates.Estado ? `<span class="text-red-600 font-bold">${pastedEstado} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedEstado} (IGNORAR)</span>`;
             const obsHtml = fieldUpdates.Observação ? `<span class="text-red-600 font-bold">${pastedObs || '...'} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedObs || '...'} (IGNORAR)</span>`;
             
+            // NOVO: Adiciona Origem
+            const origemHtml = `<span class="text-blue-600 font-bold">${escapeHtml(pastedOrigem || 'N/A')}</span>`;
+
             let planilhaHtml = `
                 <p class="font-semibold">${descHtml}</p>
                 <p><strong>Tombo:</strong> ${tomboHtml}</p>
                 <p><strong>Local:</strong> ${localHtml}</p>
                 <p><strong>Estado:</strong> ${estadoHtml}</p>
+                <p><strong>Origem:</strong> ${origemHtml}</p>
                 <p><strong>Obs:</strong> ${obsHtml}</p>
                 <p class="text-xs text-blue-600 mt-1">Planilha: ${escapeHtml(pastedItem.unidade)}</p>
             `;
@@ -498,6 +492,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
                     <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
                     <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
+                    <p><strong>Origem Atual:</strong> ${escapeHtml(bestMatch['Origem da Doação'] || 'N/A')}</p>
                     <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Motivo: ${matchReason}</p>
                 `;
                 actionHtml = `
@@ -512,18 +507,19 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
+                // NOVO: Remove opções de tombamento/permuta do select
                 actionHtml = `
                     <div class="space-y-1">
-                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
-                            <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
-                            <option value="ignore">Ignorar Linha</option>
+                        <!-- Removido 'create_new' por ser tombo já identificado na planilha -->
+                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-st-search">
+                            <option value="ignore" selected>Ignorar Linha</option>
                         </select>
-                        <!-- BOTÃO DE LIGAÇÃO MANUAL PARA ITENS NÃO ENCONTRADOS -->
+                        <!-- BOTÃO DE LIGAÇÃO MANUAL -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
                     </div>
                 `;
 
-                isCheckboxDisabled = false; // Permite seleção em massa para criar/ignorar
+                isCheckboxDisabled = false; // Permite seleção em massa para ignorar
             }
 
             html += `
@@ -556,18 +552,21 @@ function updateEditByDescSummary() {
     
     let toUpdateCount = 0;
     let toIgnoreCount = 0;
-    let toCreateCount = 0;
-    let notFoundCount = notFoundButtons.length; // Conta os botões "Não Encontrado" (que precisam de ação manual)
+    let notFoundCount = 0; // Itens que PRECISAM de ação manual
 
     selects.forEach(select => {
         if (select.value === 'update') toUpdateCount++;
         else if (select.value === 'ignore') toIgnoreCount++;
-        else if (select.value === 'create_new') toCreateCount++;
+        else if (select.value === 'create_new') notFoundCount++; // Conta como 'to be reviewed' se for a opção de criar
     });
+    
+    // Contar os itens que não tiveram match e estão aguardando link manual (botão ativo)
+    notFoundCount = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr.bg-red-50').length;
 
-    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${toCreateCount} para CRIAR, ${notFoundCount} MANUAIS.`;
+
+    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${notFoundCount} MANUAIS.`;
     // O botão só fica desabilitado se a soma das ações não for maior que zero
-    DOM_IMPORT.confirmEditByDescBtn.disabled = (toUpdateCount + toCreateCount) === 0;
+    DOM_IMPORT.confirmEditByDescBtn.disabled = (toUpdateCount + notFoundCount) === 0;
 }
 // FIM DA ALTERAÇÃO
 
@@ -581,14 +580,22 @@ function openManualLinkModal(rowIndex) {
     const { patrimonioFullList } = getState();
     const { pastedItem, systemUnitName } = multiUnitImportData.comparisonData[rowIndex];
 
+    // Dados da planilha
+    const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo);
+    const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item);
     const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
     const pastedLocalDisplay = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/A');
+    const pastedEstadoDisplay = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'N/D');
+    const pastedOrigemDisplay = extractOrigemDoacao(pastedItem) || 'N/A';
 
-    // 1. Preenche os detalhes do item colado (ADICIONANDO O LOCAL DE DESTAQUE)
+
+    // 1. Preenche os detalhes do item colado (ADICIONANDO O ESTADO E ORIGEM)
     DOM_IMPORT.manualLinkPastedItem.innerHTML = `
-        <p><strong>Descrição:</strong> ${escapeHtml(pastedItem.descricao || pastedItem.item)}</p>
-        <p><strong>Tombo (Planilha):</strong> ${escapeHtml(pastedItem.tombamento || pastedItem.tombo)}</p>
-        <p><strong>Local (Planilha):</strong> <span class="font-bold text-lg text-blue-600">${pastedLocalDisplay}</span></p>
+        <p><strong>Descrição:</strong> ${pastedDesc}</p>
+        <p><strong>Tombo (Planilha):</strong> ${pastedTombo}</p>
+        <p><strong>Estado (Planilha):</strong> <span class="font-bold text-lg text-green-600">${pastedEstadoDisplay}</span></p>
+        <p><strong>Origem (Auto):</strong> <span class="font-bold text-blue-600">${pastedOrigemDisplay}</span></p>
+        <p><strong>Local (Planilha):</strong> <span class="font-bold text-red-600">${pastedLocalDisplay}</span></p>
     `;
 
     // 2. Preenche o nome da unidade
@@ -606,20 +613,29 @@ function openManualLinkModal(rowIndex) {
     
     let systemItems = allStCandidates;
     let localMatchesCount = 0;
+    let estadoMatchesCount = 0;
 
-    // Lógica de Filtragem por Local (Req do Usuário)
+    // Lógica de Filtragem por Local (Prioridade)
     if (pastedLocal) {
-        const localMatches = allStCandidates.filter(item => 
+        systemItems = allStCandidates.filter(item => 
             normalizeStr(item.Localização) === pastedLocal
         );
-        localMatchesCount = localMatches.length;
-        
-        // Se houver correspondências de local, mostra APENAS elas.
-        // Se não houver, mantém a lista completa de S/T para que o usuário ligue.
-        if (localMatches.length > 0) {
-            systemItems = localMatches;
-        }
+        localMatchesCount = systemItems.length;
     }
+    
+    // Lógica de Filtragem por Estado (Secundário)
+    if (systemItems.length === 0 && pastedEstadoDisplay !== 'N/D') {
+        systemItems = allStCandidates.filter(item => 
+            normalizeEstadoConservacao(item.Estado) === pastedEstadoDisplay
+        );
+        estadoMatchesCount = systemItems.length;
+    }
+
+    // Se não achou por Local nem Estado, volta para todos os S/T
+    if (localMatchesCount === 0 && estadoMatchesCount === 0) {
+        systemItems = allStCandidates;
+    }
+
     
     // 4. Preenche o select com a Localização e o Estado (ATUALIZADO)
     DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item --</option>' +
@@ -631,13 +647,15 @@ function openManualLinkModal(rowIndex) {
             </option>
         `).join('');
 
-    // 5. Exibe a mensagem de filtro (ADICIONADA NO HTML na resposta anterior, mas a lógica está aqui)
+    // 5. Exibe a mensagem de filtro (ATUALIZADO)
     const filterMessage = document.getElementById('manual-link-filter-message');
     if (filterMessage) {
         if (localMatchesCount > 0) {
              filterMessage.innerHTML = `<span class="font-semibold text-green-700">${localMatchesCount} itens filtrados</span> com Localização correspondente à planilha.`;
-        } else if (pastedLocal) {
-             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> Listando todos os S/T desta unidade.`;
+        } else if (estadoMatchesCount > 0) {
+             filterMessage.innerHTML = `<span class="font-semibold text-yellow-700">${estadoMatchesCount} itens filtrados</span> com Estado correspondente à planilha.`;
+        } else if (pastedLocal || pastedEstadoDisplay !== 'N/D') {
+             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado por filtros rígidos.</span> Listando todos os S/T desta unidade.`;
         } else {
              filterMessage.innerHTML = `Listando todos os itens S/T desta unidade.`;
         }
@@ -867,7 +885,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
             // Normaliza o valor do estado
             const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
             
-            // Extrai a origem da doação
+            // Extrai a origem da doação usando a nova função
             const origemDoacao = extractOrigemDoacao(item);
             
             return `
@@ -879,7 +897,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
                         <span class="font-semibold text-blue-600">${escapeHtml(estadoNormalizado)}</span>
                         <span class="text-xs text-slate-500" title="Valor original colado">(${escapeHtml(estadoInput)})</span>
                     </td>
-                    <td class="p-2 text-green-600 font-medium">${escapeHtml(origemDoacao)}</td>
+                    <td class="p-2 text-green-600 font-medium">${escapeHtml(origemDoacao || 'N/A')}</td>
                 </tr>
             `;
         }).join('');
@@ -1115,7 +1133,6 @@ export function setupImportacaoListeners(reloadDataCallback) {
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
         const itemsToUpdate = [];
-        const itemsToCreate = []; // Novo array para itens a criar (Req 5)
         const { fieldUpdates, comparisonData } = multiUnitImportData;
         let updateCount = 0; // Contagem para o overlay
 
@@ -1133,43 +1150,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
             const systemId = select.dataset.systemId;
             const rowIndex = parseInt(row.dataset.rowIndex, 10);
-            const { pastedItem, bestMatch, updateDescription, systemUnitName } = comparisonData[rowIndex];
+            const { pastedItem, bestMatch, updateDescription, pastedOrigem } = comparisonData[rowIndex]; // NOVO: pastedOrigem
 
-            if (action === 'create_new') {
-                // Lógica para criar novo item (Sobrando)
-                const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
-
-                // Permite a criação mesmo sem Tombo (pastedTombo pode ser vazio/S/T)
-                updateCount++;
-                const docRef = doc(collection(db, 'patrimonio'));
-                
-                const estadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
-                const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
-                const origemDoacao = extractOrigemDoacao(pastedItem);
-
-                const newItem = {
-                    id: docRef.id,
-                    Tombamento: pastedTombo || 'S/T', // Usa S/T se estiver vazio
-                    Descrição: pastedItem.descricao || pastedItem.item || 'Item sem descrição',
-                    // Tipo é incerto, usamos N/A ou o tipo de outra unidade similar
-                    Tipo: 'N/A (AUDITORIA)', 
-                    Unidade: systemUnitName, 
-                    Localização: pastedItem.local || pastedItem.localizacao || '',
-                    Fornecedor: '', 
-                    NF: '', 
-                    'Origem da Doação': origemDoacao,
-                    Estado: estadoNormalizado,
-                    Quantidade: 1, 
-                    Observação: `[Criado via Importação - Sobrando]. ${pastedTombo ? 'Tombo: ' + pastedTombo : 'Item S/T'}.`,
-                    isPermuta: false,
-                    createdAt: serverT(), 
-                    updatedAt: serverT()
-                };
-                itemsToCreate.push({ docRef, data: newItem });
-                
-            } else if (action === 'update') {
-                // Lógica de atualização (Item encontrado)
-                if (systemId && pastedItem && bestMatch) {
+            if (bestMatch) {
+                // Lógica de atualização (Item encontrado ou manualmente ligado)
+                if (systemId && pastedItem) {
                     updateCount++;
                     // Constrói o objeto de 'changes' com base nos campos selecionados
                     const changes = { updatedAt: serverT() };
@@ -1184,6 +1169,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     if (fieldUpdates.Estado) {
                         changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
                     }
+                    // NOVO: Adiciona Origem da Doação se estiver marcada no update.
+                    if (pastedOrigem) {
+                        changes['Origem da Doação'] = pastedOrigem;
+                    }
+
                     // INÍCIO DA ALTERAÇÃO: (Req 2) Verifica a flag de ligação manual para forçar a atualização da descrição
                     if (fieldUpdates.Descrição || updateDescription) {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
@@ -1205,20 +1195,32 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
                     itemsToUpdate.push({
                         id: systemId,
-                        changes: changes
+                        changes: changes,
+                        pastedTombo: changes.Tombamento
                     });
                 }
+            } else {
+                 // Caso Sobrando / Não Encontrado (Tombo deve ser criado)
+                const { pastedItem, systemUnitName, pastedOrigem } = comparisonData[rowIndex];
+                const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
+                
+                // CRIAÇÃO DE NOVO ITEM SE NÃO FOI LIGADO MANUALMENTE
+                // Se chegou aqui, é um item não ligado que o usuário marcou para processar (mas não tem ação 'create_new')
+                // A única forma de um item 'não encontrado' ser processado é se for ligado manualmente (o que muda o bestMatch)
+                // Se a linha ainda é vermelha (bestMatch=null) e o checkbox está marcado, o usuário pode estar tentando criar (mas a opção 'create_new' foi removida)
+                // Como não queremos criar um item que tem Tombo mas não foi ligado, vamos ignorar e notificar.
+                
+                showNotification(`O Tombo ${pastedTombo} da planilha não foi encontrado nem ligado manualmente. A linha foi ignorada.`, 'warning');
             }
         });
 
         if (updateCount === 0) {
             // Mensagem de erro atualizada
-            return showNotification('Nenhum item foi marcado (checkbox) para "Atualizar" ou "Criar Novo Item".', 'info');
+            return showNotification('Nenhum item foi marcado (checkbox) para "Atualizar".', 'info');
         }
 
-        showOverlay(`Processando ${itemsToUpdate.length} atualizações e ${itemsToCreate.length} criações...`);
+        showOverlay(`Processando ${itemsToUpdate.length} atualizações...`);
         const batch = writeBatch(db);
-        const newItemsForCache = [];
         const updatedItemIds = []; // IDs dos itens atualizados para limpar da UI
 
         // Adiciona atualizações ao batch
@@ -1228,40 +1230,26 @@ export function setupImportacaoListeners(reloadDataCallback) {
             updatedItemIds.push(item.id);
         });
 
-        // Adiciona criações ao batch
-        itemsToCreate.forEach(item => {
-            batch.set(item.docRef, item.data);
-            newItemsForCache.push(item.data);
-        });
-
         try {
             await batch.commit();
-            
-            // Atualiza cache (apenas com os novos, o reload se encarrega do resto)
-            if (newItemsForCache.length > 0) {
-                await idb.patrimonio.bulkAdd(newItemsForCache);
-            }
             
             // Limpa o cache para forçar o reload (apenas metadados)
             await idb.metadata.clear(); 
             
             showNotification(`${updateCount} ações concluídas!`, 'success');
             
-            // --- INÍCIO DA CORREÇÃO: Não recarrega, apenas limpa o estado ---
-            
             // 1. Remove os itens do estado local 'comparisonData'
-            const processedItemIndices = itemsToUpdate.map(item => comparisonData.findIndex(row => row.bestMatch && row.bestMatch.id === item.id))
-                                       .concat(itemsToCreate.map(item => comparisonData.findIndex(row => row.pastedItem.tombamento === normalizeTombo(item.data.Tombamento))));
+            const processedTomboSet = new Set(itemsToUpdate.map(item => normalizeTombo(item.pastedTombo)));
             
-            // Remove os itens processados da lista de dados comparativos (de trás para frente)
-            processedItemIndices.sort((a, b) => b - a).filter(index => index > -1).forEach(index => {
-                 multiUnitImportData.comparisonData.splice(index, 1);
+            // Filtra o comparisonData, removendo os itens que tiveram seu Tombo processado
+            multiUnitImportData.comparisonData = multiUnitImportData.comparisonData.filter(row => {
+                const pastedTombo = normalizeTombo(row.pastedItem.tombamento || row.pastedItem.tombo);
+                return !processedTomboSet.has(pastedTombo);
             });
             
             // 2. Re-renderiza a lista de preview
             if(multiUnitImportData.comparisonData.length > 0) {
                  renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
-                 // O total de itens é atualizado dentro da função renderEditByDescPreview
             } else {
                  // Reseta a UI da aba
                  DOM_IMPORT.editByDescResults.classList.add('hidden');
@@ -1273,8 +1261,6 @@ export function setupImportacaoListeners(reloadDataCallback) {
             
             // 3. Força o recarregamento do estado global para refletir as mudanças nas outras abas
             reloadDataCallback(); 
-            
-            // --- FIM DA CORREÇÃO ---
             
         } catch (error) {
             hideOverlay();
