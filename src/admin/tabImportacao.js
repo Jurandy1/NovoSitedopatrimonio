@@ -1,4 +1,4 @@
-/**
+/**/**
  * /src/admin/tabImportacao.js
  * Lógica da aba "Importação e Substituição" (content-importacao).
  * * Lógica principal atualizada: Focar em ligar TOMBO da planilha com S/T do sistema 
@@ -518,7 +518,6 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                             <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
                             <option value="ignore">Ignorar Linha</option>
                         </select>
-                        <!-- BOTÃO DE LIGAÇÃO MANUAL PARA ITENS NÃO ENCONTRADOS -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
                     </div>
                 `;
@@ -580,34 +579,53 @@ function openManualLinkModal(rowIndex) {
     const { patrimonioFullList } = getState();
     const { pastedItem, systemUnitName } = multiUnitImportData.comparisonData[rowIndex];
 
-    // 1. Preenche os detalhes do item colado
+    const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
+    const pastedLocalDisplay = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/A');
+
+    // 1. Preenche os detalhes do item colado (ADICIONANDO O LOCAL DE DESTAQUE)
     DOM_IMPORT.manualLinkPastedItem.innerHTML = `
         <p><strong>Descrição:</strong> ${escapeHtml(pastedItem.descricao || pastedItem.item)}</p>
         <p><strong>Tombo (Planilha):</strong> ${escapeHtml(pastedItem.tombamento || pastedItem.tombo)}</p>
-        <p><strong>Local (Planilha):</strong> ${escapeHtml(pastedItem.local || pastedItem.localizacao)}</p>
+        <p><strong>Local (Planilha):</strong> <span class="font-bold text-lg text-blue-600">${pastedLocalDisplay}</span></p>
     `;
 
     // 2. Preenche o nome da unidade
     DOM_IMPORT.manualLinkUnitName.textContent = systemUnitName;
 
     // 3. Filtra e preenche o select com itens do sistema (Apenas itens S/T para ligação)
-    const systemItems = patrimonioFullList
+    const allStCandidates = patrimonioFullList
         .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName))
         .filter(i => {
             const tombo = normalizeTombo(i.Tombamento);
-            // CORREÇÃO ESSENCIAL: Mostrar APENAS S/T (Tombo vazio ou 's/t')
+            // Mostrar APENAS S/T (Tombo vazio ou 's/t')
             return (tombo === 's/t' || tombo === '') && !i.isPermuta;
         })
         .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
     
+    let systemItems = allStCandidates;
+
+    // Lógica de Filtragem por Local (Req do Usuário)
+    if (pastedLocal) {
+        const localMatches = allStCandidates.filter(item => 
+            normalizeStr(item.Localização) === pastedLocal
+        );
+        
+        // Se houver correspondências de local, mostra APENAS elas.
+        // Se não houver, mantém a lista completa de S/T para que o usuário ligue.
+        if (localMatches.length > 0) {
+            systemItems = localMatches;
+        }
+    }
+    
+    // 4. Preenche o select com a Localização inclusa
     DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item do sistema --</option>' +
         systemItems.map(item => `
             <option value="${item.id}">
-                ${escapeHtml(item.Descrição)} (Tombo: ${escapeHtml(item.Tombamento || 'S/T')})
+                ${escapeHtml(item.Descrição)} (Local: ${escapeHtml(item.Localização || 'N/I')} | Tombo: ${escapeHtml(item.Tombamento || 'S/T')})
             </option>
         `).join('');
 
-    // 4. Reseta o checkbox e abre o modal
+    // 5. Reseta o checkbox e abre o modal
     DOM_IMPORT.manualLinkUpdateDesc.checked = false;
     DOM_IMPORT.manualLinkModal.classList.remove('hidden');
 }
