@@ -543,13 +543,14 @@ function clearGiapImportSelection() {
 // --- LISTENERS ---
 
 export function setupConciliarListeners(reloadDataCallback) {
-    const { patrimonioFullList } = getState();
+    // *** CORREÇÃO: patrimonioFullList removido deste escopo ***
 
     // Lógica para abas (sub-navegação está no orquestrador)
     
     // Popula unidades ao mudar o tipo (Unidade)
     DOM_CONC.conciliarFilterTipo.addEventListener('change', () => {
-        const { reconciledUnits } = getState();
+        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+        const { reconciledUnits, patrimonioFullList } = getState();
         const selectedTipo = DOM_CONC.conciliarFilterTipo.value;
         
         // Filtra unidades que NÃO estão na lista de 'reconciledUnits'
@@ -642,7 +643,6 @@ export function setupConciliarListeners(reloadDataCallback) {
     DOM_CONC.importGiapBtn.addEventListener('click', async () => {
         if (giapItemsForImport.length === 0) return showNotification('Nenhum item GIAP selecionado para importar.', 'warning');
         
-        const { patrimonioFullList } = getState();
         const tipo = DOM_CONC.conciliarFilterTipo.value;
         const unidade = DOM_CONC.conciliarFilterUnidade.value;
         if (!unidade || !tipo) return showNotification('Por favor, carregue uma unidade primeiro antes de importar.', 'warning');
@@ -733,6 +733,8 @@ export function setupConciliarListeners(reloadDataCallback) {
 
     // --- LISTENERS PARA SUB-ABA CONCILIAR SOBRAS ---
     DOM_CONC.sobrasFilterTipo.addEventListener('change', () => {
+         // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+         const { patrimonioFullList } = getState();
          const selectedTipo = DOM_CONC.sobrasFilterTipo.value;
          const unitsToShow = getState().reconciledUnits.filter(unitName => {
             if (!selectedTipo) return true;
@@ -774,6 +776,8 @@ export function setupConciliarListeners(reloadDataCallback) {
 
     // --- LISTENERS PARA SUB-ABA ITENS A TOMBAR ---
     DOM_CONC.tombarFilterTipo.addEventListener('change', () => {
+         // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+         const { patrimonioFullList } = getState();
          const tipo = DOM_CONC.tombarFilterTipo.value;
          const unidades = [...new Set(patrimonioFullList
             .filter(i => i.etiquetaPendente === true && (!tipo || normalizeStr(i.Tipo) === normalizeStr(tipo)))
@@ -788,6 +792,8 @@ export function setupConciliarListeners(reloadDataCallback) {
         const btn = e.target.closest('.confirmar-tombamento-btn');
         if (!btn) return;
         
+        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
+        const { patrimonioFullList } = getState();
         const id = btn.dataset.id;
         btn.disabled = true;
         btn.textContent = 'Salvando...';
