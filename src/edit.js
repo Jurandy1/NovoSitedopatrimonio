@@ -334,5 +334,3 @@ function init() {
     // Configura Listeners de Eventos
     setupListeners();
 }
-
-document.addEventListener('DOMContentLoaded', init);
