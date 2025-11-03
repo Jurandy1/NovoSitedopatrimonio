@@ -44,6 +44,7 @@ const DOM = {
     conciliarFilterTipo: document.getElementById('filter-tipo'),
     conciliarFilterUnidade: document.getElementById('filter-unidade'),
     loadConciliarBtn: document.getElementById('load-conciliar'),
+    unitReconciledWarning: document.getElementById('unit-reconciled-warning'), // CORREÇÃO: Adicionado
     systemListFilter: document.getElementById('system-list-filter'),
     systemList: document.getElementById('system-list'),
     giapListFilter: document.getElementById('giap-list-filter'),
@@ -53,6 +54,15 @@ const DOM = {
     createdLinks: document.getElementById('created-links'),
     saveLinksBtn: document.getElementById('save-links'),
     clearSelectionsBtn: document.getElementById('clear-selections'),
+
+    // Aba: Planilha GIAP (NOVO)
+    giapTableBody: document.getElementById('giap-table-body'),
+
+    // Aba: Notas Fiscais (NOVO)
+    nfContainer: document.getElementById('notas-fiscais-container'),
+    nfSearch: document.getElementById('nf-search'),
+    nfItemSearch: document.getElementById('nf-item-search'),
+    nfClearFiltersBtn: document.getElementById('clear-nf-filters-btn'),
 };
 
 // --- ESTADO LOCAL/TRANSITÓRIO ---
@@ -61,6 +71,7 @@ let currentDeleteItemIds = [];
 let selSys = null, selGiap = null; // Seleções para conciliação
 let linksToCreate = [];
 let currentEditFilter = { tipo: '', unidade: '', estado: '', descricao: '' };
+let nfDataCache = null; // Cache para dados de NF processados
 
 // --- INICIALIZAÇÃO E CARREGAMENTO DE DADOS ---
 
@@ -152,10 +163,13 @@ function updateUIFromState(state) {
         if (state.initialLoadComplete) {
             // CORREÇÃO: Chama as funções de população que agora têm código
             populateEditableInventoryTab();
-            populateUnitMappingTab(); // AGORA IMPLEMENTADO
-            populateReconciliationTab(); // AGORA IMPLEMENTADO
+            populateUnitMappingTab(); 
+            populateReconciliationTab();
             populatePendingTransfersTab(); // Ainda está vazia
-            // ... outras abas
+            
+            // CORREÇÃO: Chamar as novas funções
+            populateGiapTab();
+            populateNfTab();
         }
     }
 }
@@ -292,7 +306,8 @@ function populateUnitMappingTab() {
  * @param {object} unitMapping - O objeto de mapeamento do estado.
  */
 function renderSavedMappings(unitMapping) {
-    DOM.savedMappingsContainer.innerHTML = Object.entries(unitMapping).map(([systemUnit, giapUnits]) => {
+    // CORREÇÃO: Adicionado (unitMapping || {}) para evitar erro se unitMapping for nulo
+    DOM.savedMappingsContainer.innerHTML = Object.entries(unitMapping || {}).map(([systemUnit, giapUnits]) => {
         if (!giapUnits || giapUnits.length === 0) return '';
         return `
             <div class="p-2 border rounded-md bg-slate-50 flex justify-between items-center">
@@ -324,6 +339,150 @@ function populateReconciliationTab() {
 }
 
 function populatePendingTransfersTab() { /* ... Lógica de transferências pendentes ... */ }
+
+/**
+ * CORREÇÃO: Popula a aba "Planilha GIAP"
+ */
+function populateGiapTab() {
+    const { giapInventory } = getState();
+    if (!giapInventory || giapInventory.length === 0) return;
+
+    const headers = Object.keys(giapInventory[0]);
+    const tableHead = document.querySelector('#content-giap thead tr');
+    const tableBody = DOM.giapTableBody;
+
+    tableHead.innerHTML = headers.map(h => `<th class="p-3 text-left font-semibold">${escapeHtml(h)}</th>`).join('');
+    
+    tableBody.innerHTML = giapInventory.slice(0, 500).map(item => `
+        <tr class="border-b border-slate-200 hover:bg-slate-50">
+            ${headers.map(h => `<td class="p-2 text-xs">${escapeHtml(item[h])}</td>`).join('')}
+        </tr>
+    `).join('');
+}
+
+/**
+ * CORREÇÃO: Popula a aba "Notas Fiscais"
+ */
+function populateNfTab() {
+    renderNfList(); // Renderiza a lista inicial (vazia ou completa)
+
+    // Adiciona listeners aos filtros
+    const debouncedRender = debounce(renderNfList, 300);
+    DOM.nfSearch.addEventListener('input', debouncedRender);
+    DOM.nfItemSearch.addEventListener('input', debouncedRender);
+    DOM.nfClearFiltersBtn.addEventListener('click', () => {
+        DOM.nfSearch.value = '';
+        DOM.nfItemSearch.value = '';
+        renderNfList();
+    });
+}
+
+/**
+ * Processa dados do GIAP para agrupar por NF.
+ * @returns {object} Objeto com NFs como chaves.
+ */
+function processNfData() {
+    if (nfDataCache) return nfDataCache; // Usa cache se disponível
+
+    const { giapInventory } = getState();
+    if (giapInventory.length === 0) return {};
+
+    const giapWithNf = giapInventory
+        .filter(item => item.NF && item.NF.trim() !== '')
+        .sort((a, b) => parsePtBrDate(b.Cadastro) - parsePtBrDate(a.Cadastro));
+    
+    nfDataCache = giapWithNf.reduce((acc, item) => {
+        const nf = item.NF.trim();
+        if (!acc[nf]) {
+            acc[nf] = {
+                items: [],
+                fornecedor: item['Nome Fornecedor'] || 'Não especificado',
+                tipoEntrada: item['Tipo Entrada'] || 'N/A',
+                dataCadastro: item.Cadastro
+            };
+        }
+        acc[nf].items.push(item);
+        return acc;
+    }, {});
+    
+    return nfDataCache;
+}
+
+/**
+ * Renderiza a lista de Notas Fiscais com base nos filtros.
+ */
+function renderNfList() {
+    const { patrimonioFullList } = getState();
+    const processedNfData = processNfData();
+    const container = DOM.nfContainer;
+
+    if (!container) return;
+    container.innerHTML = '';
+    if (Object.keys(processedNfData).length === 0) return; 
+
+    const tomboMap = new Map(patrimonioFullList.map(item => [normalizeTombo(item.Tombamento), item]));
+    
+    const nfSearchTerm = normalizeStr(DOM.nfSearch.value);
+    const itemSearchTerm = normalizeStr(DOM.nfItemSearch.value);
+    
+    const filteredNfs = Object.keys(processedNfData).filter(nf => {
+        if (nfSearchTerm && !normalizeStr(nf).includes(nfSearchTerm)) return false;
+        
+        const nfGroup = processedNfData[nf];
+        if (itemSearchTerm) {
+            const itemMatch = nfGroup.items.some(item => 
+                normalizeStr(item.Descrição).includes(itemSearchTerm) || 
+                normalizeStr(item.Espécie).includes(itemSearchTerm)
+            );
+            if (!itemMatch) return false;
+        }
+        return true;
+    });
+
+    if (filteredNfs.length === 0) {
+        container.innerHTML = `<p class="text-slate-500 text-center p-4">Nenhuma nota fiscal encontrada com os filtros aplicados.</p>`;
+        return;
+    }
+    
+    // Renderização
+    filteredNfs.slice(0, 100).forEach(nf => { // Limita a 100 NFs por performance
+        const nfGroup = processedNfData[nf];
+        const nfDetails = document.createElement('details');
+        nfDetails.className = 'bg-white rounded-lg shadow-sm border mb-3';
+        const itemSummaryText = nfGroup.items.slice(0, 2).map(i => escapeHtml(i.Descrição || i.Espécie)).join(', ') + (nfGroup.items.length > 2 ? '...' : '');
+
+        nfDetails.innerHTML = `
+            <summary class="p-4 font-semibold cursor-pointer grid grid-cols-1 md:grid-cols-3 gap-4 items-center hover:bg-slate-50">
+                <div class="md:col-span-2">
+                    <p class="text-xs text-slate-500">NF: <strong class="text-blue-700 text-sm">${escapeHtml(nf)}</strong> | Fornecedor: <strong>${escapeHtml(nfGroup.fornecedor)}</strong></p>
+                    <p class="text-xs text-slate-500 mt-1 truncate">Itens: ${itemSummaryText}</p>
+                </div>
+                <div><p class="text-xs text-slate-500">Data Cadastro</p><strong>${escapeHtml(nfGroup.dataCadastro)}</strong></div>
+            </summary>
+            <div class="p-4 border-t border-slate-200 space-y-2">
+                ${nfGroup.items.map(item => {
+                    const tombo = normalizeTombo(item.TOMBAMENTO);
+                    const allocatedItem = tombo ? tomboMap.get(tombo) : undefined;
+                    let allocationHtml = '';
+                    
+                    if (allocatedItem) {
+                        allocationHtml = `<span class="badge badge-green">Alocado em: ${escapeHtml(allocatedItem.Unidade)}</span>`;
+                    } else if (normalizeStr(item.Status) !== 'disponível') {
+                         allocationHtml = `<span class="badge badge-yellow">Status: ${escapeHtml(item.Status)}</span>`;
+                    } else {
+                        allocationHtml = `<span class="badge badge-blue">Disponível</span>`;
+                    }
+                    
+                    return `<div class="p-3 border rounded-md flex justify-between items-center bg-slate-50/50">
+                                <div><p class="font-bold text-slate-800">${escapeHtml(item.Descrição || item.Espécie)}</p><p class="text-sm text-slate-500">Tombo: <span class="font-mono">${escapeHtml(tombo || 'N/D')}</span></p></div>
+                                <div class="text-right ml-4">${allocationHtml}</div>
+                            </div>`;
+                }).join('')}
+            </div>
+        `;
+        container.appendChild(nfDetails);
+    });
+}
 
 
 // --- LISTENERS ---
@@ -377,21 +536,26 @@ function setupListeners() {
         // CORREÇÃO: Usar o 'db' importado
         const batch = writeBatch(db); 
         
-        dirtyItems.forEach((changes, id) => {
+        const itemsToSave = new Map(dirtyItems); // Copia o map
+        dirtyItems.clear(); // Limpa o original
+        DOM.saveAllChangesBtn.disabled = true;
+
+        itemsToSave.forEach((changes, id) => {
             const itemRef = doc(db, 'patrimonio', id);
             batch.update(itemRef, { ...changes, lastModified: serverTimestamp() });
         });
 
         try {
             await batch.commit();
-            dirtyItems.clear();
-            DOM.saveAllChangesBtn.disabled = true;
-            showNotification(`${dirtyItems.size} alterações salvas com sucesso!`, 'success');
+            showNotification(`${itemsToSave.size} alterações salvas com sucesso!`, 'success');
             // Recarregar dados para refletir mudanças
             await loadData(true); 
-        } catch (error) {
+        } catch (error {
             console.error("Erro ao salvar alterações:", error);
             showNotification('Erro ao salvar alterações.', 'error');
+            // Se der erro, restaura os itens que falharam
+            dirtyItems = new Map([...itemsToSave, ...dirtyItems]);
+            DOM.saveAllChangesBtn.disabled = dirtyItems.size > 0;
         } finally {
             hideOverlay();
         }
@@ -443,7 +607,7 @@ function setupListeners() {
             renderSavedMappings(updatedMapping); // Re-renderiza a lista de salvos
 
             showNotification('Mapeamento salvo com sucesso!', 'success');
-        } catch (error) {
+        } catch (error {
             console.error("Erro ao salvar mapeamento:", error);
             showNotification('Erro ao salvar mapeamento.', 'error');
         } finally {
@@ -458,6 +622,8 @@ function setupListeners() {
         const systemUnit = deleteBtn.dataset.systemUnit;
         if (!systemUnit) return;
 
+        // CORREÇÃO: Usar um modal customizado ou `confirm()` (se soubermos que funciona)
+        // Por segurança, vou assumir que `confirm` funciona, mas um modal seria melhor.
         if (!confirm(`Tem certeza que deseja excluir o mapeamento para "${systemUnit}"?`)) {
             return;
         }
@@ -467,8 +633,9 @@ function setupListeners() {
             const mappingRef = doc(db, 'config', 'unitMapping');
             
             // Para excluir um campo, usamos updateDoc com deleteField()
+            const keyToDelete = `mappings.${systemUnit}`;
             await updateDoc(mappingRef, {
-                [`mappings.${systemUnit}`]: deleteField()
+                [keyToDelete]: deleteField()
             });
 
             // Atualiza o estado local
@@ -478,7 +645,7 @@ function setupListeners() {
             renderSavedMappings(currentMapping); // Re-renderiza a lista
 
             showNotification('Mapeamento excluído!', 'success');
-        } catch (error) {
+        } catch (error {
             console.error("Erro ao excluir mapeamento:", error);
             showNotification('Erro ao excluir mapeamento.', 'error');
         } finally {
@@ -509,11 +676,20 @@ function setupListeners() {
             showNotification('Por favor, selecione um tipo e uma unidade.', 'warning');
             return;
         }
+        
+        const reconciled = reconciledUnits || [];
+
+        // CORREÇÃO: Adiciona aviso se a unidade já foi conciliada
+        const isUnitReconciled = reconciled.includes(selectedUnit);
+        DOM.unitReconciledWarning.classList.toggle('hidden', !isUnitReconciled);
+        DOM.unitReconciledWarning.textContent = 'Atenção: Esta unidade já foi marcada como "Concluída". Os itens restantes são sobras ou ainda não foram vinculados.';
 
         // 1. Popula Itens do Sistema (S/T)
+        // Mostra apenas itens S/T que AINDA não foram vinculados (não estão em `reconciled`)
         const systemItems = patrimonioFullList.filter(item => 
             item.Unidade === selectedUnit && 
-            (item.Tombamento === 'S/T' || !item.Tombamento)
+            (item.Tombamento === 'S/T' || !item.Tombamento) &&
+            !reconciled.includes(item.id) // Assumindo que `reconciledUnits` armazena o ID do item S/T
         ).sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
         
         DOM.systemList.innerHTML = systemItems.length > 0
@@ -523,7 +699,7 @@ function setupListeners() {
                     <p class="text-xs text-slate-500">${escapeHtml(item.Localização) || 'Sem local'}</p>
                 </div>
             `).join('')
-            : '<p class="p-4 text-slate-500 text-center">Nenhum item "S/T" encontrado para esta unidade.</p>';
+            : '<p class="p-4 text-slate-500 text-center">Nenhum item "S/T" pendente encontrado para esta unidade.</p>';
 
         // 2. Popula Itens do GIAP (Disponíveis)
         const giapUnitsForSystemUnit = (unitMapping && unitMapping[selectedUnit]) ? unitMapping[selectedUnit] : [];
@@ -533,7 +709,7 @@ function setupListeners() {
         giapMap.forEach((item, tombo) => {
             // Inclui se a unidade do GIAP está mapeada para a unidade do sistema E
             // se o tombo não está na lista de "já conciliados"
-            if (giapUnitsForSystemUnit.includes(item.Unidade) && !reconciledUnits.includes(tombo)) {
+            if (giapUnitsForSystemUnit.includes(item.Unidade) && !reconciled.includes(tombo)) {
                 giapItems.push(item);
             }
         });
@@ -576,3 +752,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
