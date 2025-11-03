@@ -32,11 +32,11 @@ const DOM = {
     navButtons: document.querySelectorAll('#edit-nav .nav-btn'),
     contentPanes: document.querySelectorAll('main > div[id^="content-"]'),
     
-    // Modais (sincronização e adição de item)
-    syncConfirmModal: document.getElementById('sync-confirm-modal'),
-    addItemModal: document.getElementById('add-item-modal'),
-
-    // Navegação de Sub-abas (usada aqui para gerenciar a troca de conteúdo)
+ // --- IMPORTS DE SERVIÇOS E ESTADO ---
+-import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT } from './services/firebase.js';
++import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
+ import { loadGiapInventory } from './services/giapService.js';
+ import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
     subTabNavConciliar: document.querySelectorAll('#content-conciliar .sub-nav-btn'),
     subTabNavImportacao: document.querySelectorAll('#content-importacao .sub-nav-btn'),
 
