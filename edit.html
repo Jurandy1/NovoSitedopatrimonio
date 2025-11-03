@@ -408,11 +408,12 @@
                         </div>
                     </div>
                     
-                    <!-- INÍCIO: Nova Sub-Aba: Editar por Descrição -->
+                    <!-- INÍCIO: Alterações na Sub-Aba: Editar por Descrição -->
                     <div id="subtab-content-edit-by-desc" class="hidden">
-                        <h2 class="text-xl font-bold text-slate-800 mb-2">Editar Tombamentos por Descrição (com Lógica Aprimorada)</h2>
+                        <h2 class="text-xl font-bold text-slate-800 mb-2">Atualizar Itens por Descrição (Importação Inteligente)</h2>
                         <p class="text-sm text-slate-600 mb-4">
-                            Esta ferramenta inteligente atualiza itens existentes em uma unidade. Ela localiza os itens por <strong class="text-blue-600">Descrição similar</strong> e outros campos, depois atualiza Tombamento, Localização e Estado.
+                            Esta ferramenta atualiza itens existentes na unidade selecionada. Ela compara sua planilha com o sistema usando <strong class="text-blue-600">descrição similar e localização</strong>.
+                            Você poderá aprovar quais itens devem ter o <strong>Tombamento, Localização e Estado</strong> atualizados.
                         </p>
 
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -429,24 +430,40 @@
                         <div>
                             <label for="edit-by-desc-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui (com cabeçalho)</label>
                             <p class="text-xs text-slate-500 mb-2">
-                                O sistema identificará as colunas pelos cabeçalhos: <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO DE CONSERVAÇÃO (ou Estado)</strong>.
+                                O sistema identificará os cabeçalhos: <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO DE CONSERVAÇÃO (ou Estado)</strong>.
                             </p>
                             <textarea id="edit-by-desc-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
-                        <button id="preview-edit-by-desc-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Dados para Atualização</button>
+                        <button id="preview-edit-by-desc-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Comparação</button>
 
                         <div id="edit-by-desc-results" class="hidden mt-6 border-t pt-4">
-                             <h3 class="font-bold text-slate-700 mb-2">Pré-visualização das Atualizações (<span id="edit-by-desc-preview-count">0</span> itens)</h3>
-                             <p class="text-sm text-slate-600 mb-4">Revise as alterações. Itens em <span class="text-yellow-600 font-semibold">amarelo</span> não foram encontrados ou a correspondência é ambígua. Itens em <span class="text-red-600 font-semibold">vermelho</span> possuem um tombamento que já está em uso por outro item. Itens em <span class="text-orange-600 font-semibold">laranja</span> possuem um tombo que pertence a outra unidade no GIAP.</p>
+                             <h3 class="font-bold text-slate-700 mb-2">Comparação de Itens (<span id="edit-by-desc-preview-count">0</span> itens da planilha)</h3>
+                             <p class="text-sm text-slate-600 mb-4">Revise as correspondências. Itens em <span class="text-green-600 font-semibold">verde</span> tiveram alta similaridade e estão pré-selecionados para <strong class="text-green-800">Atualizar</strong>. Itens em <span class="text-yellow-600 font-semibold">amarelo</span> tiveram similaridade média. Itens em <span class="text-red-600 font-semibold">vermelho</span> não foram encontrados no sistema para esta unidade.</p>
+                            
+                             <!-- Controles de Ação em Massa -->
+                             <div class="p-3 bg-slate-100 rounded-lg flex flex-wrap items-center gap-4 mb-4">
+                                <label class="flex items-center font-medium">
+                                    <input type="checkbox" id="edit-by-desc-select-all" class="h-4 w-4 mr-2">
+                                    Selecionar Todos
+                                </label>
+                                <select id="edit-by-desc-bulk-action" class="p-2 border rounded-lg bg-white text-sm">
+                                    <option value="">-- Ação em Massa --</option>
+                                    <option value="update">Atualizar Selecionados</option>
+                                    <option value="ignore">Ignorar Selecionados</option>
+                                </select>
+                                <button id="edit-by-desc-bulk-apply" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">Aplicar</button>
+                                <span id="edit-by-desc-summary" class="text-sm font-semibold text-slate-700 ml-auto"></span>
+                            </div>
+
                             <div id="edit-by-desc-preview-table-container" class="reconciliation-container overflow-y-auto space-y-2 p-2 bg-slate-50 border rounded-lg">
-                                <!-- A tabela de pré-visualização será inserida aqui -->
+                                <!-- A tabela de pré-visualização será inserida aqui pelo JS -->
                             </div>
                              <div class="mt-4">
                                 <button id="confirm-edit-by-desc-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:bg-slate-400">Confirmar e Atualizar Itens</button>
                             </div>
                         </div>
                     </div>
-                    <!-- FIM: Nova Sub-Aba -->
+                    <!-- FIM: Alterações na Sub-Aba -->
 
                     <!-- Sub-Aba: Importar em Massa (funcionalidade antiga) -->
                     <div id="subtab-content-massa" class="hidden">
