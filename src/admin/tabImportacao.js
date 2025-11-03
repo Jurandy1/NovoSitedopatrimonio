@@ -341,7 +341,7 @@ function processUnitMappingAndLoadItems() {
 }
 
 
-// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo Exato OU Match RÍGIDO (S/T)
+// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo Exato OU Match RÍGIDO (S/T). AGORA SÓ ACEITA TOMBO NUMÉRICO DA PLANILHA
 /**
  * Encontra a melhor correspondência para a planilha: Tombo Exato OU Match Rígido (S/T).
  */
@@ -365,11 +365,11 @@ function findBestMatch(pastedItem, itemsPool) {
     // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
     const stCandidates = itemsPool.filter(item => {
         const tombo = normalizeTombo(item.Tombamento);
-        // REGRA 3: Apenas S/T (sem numeração) e não Permuta pode ser ligado
+        // REGRA: Apenas S/T (sem numeração) e não Permuta pode ser ligado
         return (tombo === 's/t' || tombo === '') && !item.isPermuta;
     });
 
-    // Se o Tombo da planilha é numérico, mas não achou um match exato, e não há S/T disponíveis
+    // Se a planilha TEM Tombo, mas não achou um match exato, e não há S/T disponíveis
     if (pastedTombo && pastedTombo !== 's/t') {
         // Se a planilha TEM Tombo, mas não achou por Tombo Exato, e não há itens S/T para ligar
         // Ou seja, o Tombo da planilha não bate, e não há S/T para ligar
