@@ -1,4 +1,4 @@
-/**/**
+/**
  * src/utils/helpers.js
  * Funções utilitárias comuns: notificação, normalização de string, debounce e manipulação de moeda.
  */
