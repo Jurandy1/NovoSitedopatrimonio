@@ -274,10 +274,9 @@ function processUnitMappingAndLoadItems() {
 
         // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO DO USUÁRIO) ---
         const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
-        const isPastedTomboValid = pastedTombo && pastedTombo !== 's/t' && pastedTombo.toLowerCase() !== 'permuta';
         const isPastedDoacao = normalizeStr(extractOrigemDoacao(pastedItem)).includes('doacao');
 
-        // REGRA 1 & 2: Descarta se for S/T E não for Doação.
+        // REGRA 1 & 2: Descarta se for S/T OU VAZIO E NÃO for Doação.
         if ((pastedTombo === 's/t' || pastedTombo === '') && !isPastedDoacao) {
              return; 
         }
@@ -1029,7 +1028,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
         const systemUnits = [...normalizedSystemUnits.values()];
 
         // Encontra unidades únicas da planilha
-        const pastedUnits = new Set(parsed.map(item => item.unidade).filter(Boolean));
+        // CORREÇÃO DE BUG: Garante que o próprio nome do cabeçalho "unidade" não seja incluído na lista de unidades a mapear,
+        // caso o usuário tenha copiado um placeholder ou a linha de cabeçalho acidentalmente.
+        const pastedUnits = new Set(parsed.map(item => item.unidade)
+            .filter(unit => unit && normalizeStr(unit) !== 'unidade'));
+        
         const unitsToMatch = new Map();
 
         // Tenta encontrar a melhor correspondência
