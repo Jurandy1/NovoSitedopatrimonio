@@ -212,12 +212,14 @@
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <h3 class="font-semibold text-slate-800 mb-2">Itens sem Tombamento no Sistema</h3>
+                                <!-- MELHORIA 2: Título da caixa -->
+                                <h3 class="font-semibold text-slate-800 mb-2">Itens sem Tombamento no Sistema (com Estado e Obs.)</h3>
                                 <input type="text" id="system-list-filter" class="w-full p-2 border rounded-lg mb-2" placeholder="Filtrar por descrição...">
                                 <div id="system-list" class="reconciliation-container border p-2 space-y-2 rounded-lg bg-slate-50 overflow-y-auto"></div>
                             </div>
                             <div>
-                                <h3 class="font-semibold text-slate-800 mb-2">Tombos Disponíveis (GIAP) para <span id="giap-list-unit-name" class="text-blue-600 font-bold"></span></h3>
+                                <!-- MELHORIA 1: Título da caixa (removido span) -->
+                                <h3 class="font-semibold text-slate-800 mb-2">Tombos Disponíveis (GIAP)</h3>
                                 <input type="text" id="giap-list-filter" class="w-full p-2 border rounded-lg mb-2" placeholder="Filtrar por descrição...">
                                 <div id="giap-list" class="reconciliation-container border p-2 space-y-2 rounded-lg bg-slate-50 overflow-y-auto"></div>
                             </div>
