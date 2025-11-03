@@ -41,6 +41,11 @@ const DOM = {
     contentPanes: document.querySelectorAll('main > .tab-content'),
     historyContainer: document.getElementById('history-container'),
     tabNotas: document.getElementById('tab-notas'),
+    // Elementos do modal de login
+    loginErrorEl: document.getElementById('login-error'),
+    loginBtn: document.getElementById('btn-login'),
+    loginBtnText: document.getElementById('login-btn-text'),
+    loginBtnSpinner: document.getElementById('login-btn-spinner'),
 };
 
 
@@ -373,6 +378,27 @@ function renderNfList(processedNfData, patrimonioFullList) {
 
 // --- LISTENERS E INICIALIZAÇÃO ---
 
+/**
+ * Mapeia códigos de erro do Firebase para mensagens amigáveis.
+ * @param {string} errorCode - O código de erro (ex: 'auth/wrong-password').
+ * @returns {string} - A mensagem em português.
+ */
+function getFirebaseAuthErrorMessage(errorCode) {
+    switch (errorCode) {
+        case 'auth/wrong-password':
+            return 'Senha incorreta. Tente novamente.';
+        case 'auth/user-not-found':
+            return 'Usuário não encontrado com este e-mail.';
+        case 'auth/invalid-email':
+            return 'O formato do e-mail é inválido.';
+        case 'auth/too-many-requests':
+            return 'Muitas tentativas de login. Tente novamente mais tarde.';
+        default:
+            return 'Erro ao fazer login. Verifique sua conexão ou tente mais tarde.';
+    }
+}
+
+
 function setupListeners() {
     const state = getState();
     // Auth Listener
@@ -413,9 +439,30 @@ function setupListeners() {
     // Login/Logout
     DOM.loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        
+        // CORREÇÃO: Adiciona feedback de carregamento e manipulação de erro
+        DOM.loginBtn.disabled = true;
+        DOM.loginBtnText.classList.add('hidden');
+        DOM.loginBtnSpinner.classList.remove('hidden');
+        DOM.loginErrorEl.classList.add('hidden');
+
         const result = await handleLogin(DOM.loginForm.email.value, DOM.loginForm.password.value);
-        if (result === true) { DOM.loginModal.classList.add('hidden'); }
+
+        DOM.loginBtn.disabled = false;
+        DOM.loginBtnText.classList.remove('hidden');
+        DOM.loginBtnSpinner.classList.add('hidden');
+
+        if (result === true) { 
+            DOM.loginModal.classList.add('hidden');
+            DOM.loginForm.reset(); // Limpa o formulário
+        } else {
+            // A função handleLogin retorna um objeto em caso de erro
+            const errorMessage = getFirebaseAuthErrorMessage(result.code);
+            DOM.loginErrorEl.textContent = errorMessage;
+            DOM.loginErrorEl.classList.remove('hidden');
+        }
     });
+
     DOM.logoutBtn.addEventListener('click', handleLogout);
     DOM.openLoginModalBtn.addEventListener('click', () => DOM.loginModal.classList.remove('hidden'));
     
@@ -460,6 +507,3 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
-
-
-
