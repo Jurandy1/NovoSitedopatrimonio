@@ -3,10 +3,13 @@
  * Lógica da aba "Importação e Substituição" (content-importacao).
  */
 
-import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc } from '../services/firebase.js';
+// INÍCIO DA ALTERAÇÃO: Importa 'updateDoc' e a função de similaridade
+import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc, updateDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from '../utils/helpers.js';
+import { calculateSimilarity } from '../utils/similarity.js'; // Importa a função de similaridade
 import { idb } from '../services/cache.js';
+// FIM DA ALTERAÇÃO
 
 /**
  * Normaliza strings de estado de conservação para os padrões do sistema.
@@ -82,6 +85,12 @@ const DOM_IMPORT = {
     editByDescResults: document.getElementById('edit-by-desc-results'),
     editByDescPreviewTableContainer: document.getElementById('edit-by-desc-preview-table-container'),
     confirmEditByDescBtn: document.getElementById('confirm-edit-by-desc-btn'),
+    // INÍCIO DA ALTERAÇÃO: IDs para Ações em Massa
+    editByDescSelectAll: document.getElementById('edit-by-desc-select-all'),
+    editByDescBulkAction: document.getElementById('edit-by-desc-bulk-action'),
+    editByDescBulkApply: document.getElementById('edit-by-desc-bulk-apply'),
+    editByDescSummary: document.getElementById('edit-by-desc-summary'),
+    // FIM DA ALTERAÇÃO
     
     // Importar em Massa
     massTransferTombos: document.getElementById('mass-transfer-tombos'),
@@ -155,6 +164,190 @@ function setupUnitSelect(tipoSelectEl, unitSelectEl) {
         unitSelectEl.disabled = false;
     });
 }
+
+// --- INÍCIO DA ALTERAÇÃO: Funções da Lógica "Editar por Descrição" ---
+
+/**
+ * Encontra a melhor correspondência para um item da planilha no inventário do sistema.
+ * @param {object} pastedItem - O item da planilha.
+ * @param {Array<object>} systemItems - Itens do sistema na unidade selecionada.
+ */
+function findBestMatch(pastedItem, systemItems) {
+    const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
+    const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
+
+    if (!pastedDesc) {
+        return { match: null, score: 0, reason: 'Sem descrição' };
+    }
+
+    let bestMatch = null;
+    let bestScore = 0;
+
+    for (let i = 0; i < systemItems.length; i++) {
+        const systemItem = systemItems[i];
+        const systemDesc = normalizeStr(systemItem.Descrição);
+        
+        // Calcula a similaridade da descrição
+        const score = calculateSimilarity(pastedDesc, systemDesc);
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = systemItem;
+        }
+    }
+
+    // Se a melhor pontuação for muito baixa, não considera como correspondência
+    if (bestScore < 0.6) {
+        return { match: null, score: bestScore, reason: 'Similaridade baixa' };
+    }
+
+    // Lógica de desempate (Req A): Prioriza o mesmo local
+    if (pastedLocal) {
+        const potentialMatches = systemItems.filter(item => 
+            calculateSimilarity(pastedDesc, normalizeStr(item.Descrição)) > 0.7
+        );
+        
+        if (potentialMatches.length > 1) {
+            const localMatch = potentialMatches.find(item => 
+                normalizeStr(item.Localização) === pastedLocal
+            );
+            if (localMatch) {
+                return { match: localMatch, score: 1.0, reason: 'Descrição e Localização' };
+            }
+        }
+    }
+    
+    // Remove a correspondência encontrada da lista para evitar correspondências duplicadas
+    const matchIndex = systemItems.findIndex(item => item.id === bestMatch.id);
+    if (matchIndex > -1) {
+        systemItems.splice(matchIndex, 1);
+    }
+
+    return { match: bestMatch, score: bestScore, reason: 'Melhor similaridade' };
+}
+
+/**
+ * Renderiza a tabela de comparação para "Editar por Descrição". (Req B)
+ * @param {Array<object>} comparisonData - Dados processados da comparação.
+ */
+function renderEditByDescPreview(comparisonData) {
+    const container = DOM_IMPORT.editByDescPreviewTableContainer;
+    
+    // Cabeçalho da Tabela
+    let html = `
+        <table class="w-full text-sm">
+            <thead class="bg-slate-200 sticky top-0">
+                <tr>
+                    <th class="p-2 text-left w-10"><input type="checkbox" id="edit-by-desc-select-all" class="h-4 w-4"></th>
+                    <th class="p-2 text-left">Sua Planilha (Item Colado)</th>
+                    <th class="p-2 text-left">Sistema (Item Encontrado)</th>
+                    <th class="p-2 text-left w-48">Ação (Req D)</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+    let toUpdateCount = 0;
+    let toIgnoreCount = 0;
+    let notFoundCount = 0;
+
+    comparisonData.forEach((row, index) => {
+        const { pastedItem, bestMatch, score } = row;
+
+        const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
+        const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo || 'S/T');
+        const pastedLocal = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/I');
+        const pastedEstadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
+        const pastedEstado = normalizeEstadoConservacao(pastedEstadoInput);
+
+        let rowClass = '';
+        let systemHtml = '';
+        let actionHtml = '';
+
+        if (bestMatch && score > 0.7) {
+            // Correspondência Forte (Verde)
+            toUpdateCount++;
+            rowClass = 'bg-green-50';
+            systemHtml = `
+                <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
+                <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
+                <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
+                <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
+                <p class="text-xs text-slate-500">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+            `;
+            actionHtml = `
+                <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
+                    <option value="update" selected>Atualizar Tombo/Local/Estado</option>
+                    <option value="ignore">Ignorar</option>
+                </select>
+            `;
+        } else if (bestMatch && score > 0.6) {
+            // Correspondência Média (Amarelo)
+            toIgnoreCount++;
+            rowClass = 'bg-yellow-50';
+            systemHtml = `
+                <p class="font-semibold text-yellow-800">${escapeHtml(bestMatch.Descrição)}</p>
+                <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
+                <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
+                <p class="text-xs text-slate-500">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+            `;
+            actionHtml = `
+                <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
+                    <option value="ignore" selected>Ignorar (Revisar)</option>
+                    <option value="update">Atualizar Tombo/Local/Estado</option>
+                </select>
+            `;
+        } else {
+            // Não Encontrado (Vermelho)
+            notFoundCount++;
+            rowClass = 'bg-red-50 opacity-70';
+            systemHtml = `<p class="font-semibold text-red-700">Nenhum item similar encontrado no sistema para esta unidade.</p>`;
+            actionHtml = `<select class="edit-by-desc-action w-full p-2 border rounded-lg bg-slate-100" disabled><option value="not_found">Não Encontrado</option></select>`;
+        }
+
+        html += `
+            <tr class="border-b ${rowClass}" data-row-index="${index}">
+                <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${actionHtml.includes('disabled') ? 'disabled' : ''}></td>
+                <td class="p-2 align-top">
+                    <p class="font-semibold">${pastedDesc}</p>
+                    <p><strong>Novo Tombo:</strong> ${pastedTombo}</p>
+                    <p><strong>Novo Local:</strong> ${pastedLocal}</p>
+                    <p><strong>Novo Estado:</strong> ${pastedEstado} <span class="text-xs text-slate-500">(${escapeHtml(pastedEstadoInput)})</span></p>
+                </td>
+                <td class="p-2 align-top">${systemHtml}</td>
+                <td class="p-2 align-top">${actionHtml}</td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+
+    // Atualiza o sumário
+    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${notFoundCount} NÃO ENCONTRADOS.`;
+    DOM_IMPORT.confirmEditByDescBtn.disabled = toUpdateCount === 0;
+}
+
+/**
+ * Atualiza o sumário de ações com base nas seleções atuais.
+ */
+function updateEditByDescSummary() {
+    const selects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
+    let toUpdateCount = 0;
+    let toIgnoreCount = 0;
+    let notFoundCount = 0;
+
+    selects.forEach(select => {
+        if (select.value === 'update') toUpdateCount++;
+        else if (select.value === 'ignore') toIgnoreCount++;
+        else if (select.value === 'not_found') notFoundCount++;
+    });
+
+    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${notFoundCount} NÃO ENCONTRADOS.`;
+    DOM_IMPORT.confirmEditByDescBtn.disabled = toUpdateCount === 0;
+}
+
+// FIM DA ALTERAÇÃO
 
 // --- LISTENERS ---
 
@@ -452,42 +645,143 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // 5. Lógica de Edição por Descrição (Preview e Confirmação) - Omitida a complexa lógica de similaridade/score por brevidade, focando no esqueleto
+    // 5. Lógica de Edição por Descrição (Preview e Confirmação)
+    
+    // Armazena os dados da planilha colada para usar na confirmação
+    let pastedDataForUpdate = [];
+    
     DOM_IMPORT.previewEditByDescBtn.addEventListener('click', () => {
-        if (!DOM_IMPORT.editByDescUnit.value) return showNotification('Selecione a Unidade de destino.', 'warning');
+        const unidade = DOM_IMPORT.editByDescUnit.value;
+        if (!unidade) return showNotification('Selecione a Unidade de destino.', 'warning');
         
         const data = DOM_IMPORT.editByDescData.value;
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
         
-        // Simulação de parse (PapaParse)
         const parsed = Papa.parse(data, { 
             header: true, 
             skipEmptyLines: true, 
             delimiter: '\t', 
-            transformHeader: h => normalizeStr(h) // Garante cabeçalhos normalizados
+            transformHeader: h => normalizeStr(h)
         }).data;
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
-
-        // ... (Aqui viria a complexa lógica de matching com patrimonioFullList) ...
         
-        // Simulação de renderização de resultados:
+        // Armazena os dados colados para uso posterior
+        pastedDataForUpdate = parsed;
+
+        const { patrimonioFullList } = getState();
+        // Clona a lista de itens do sistema para não modificar a original durante a busca
+        let systemItemsInUnit = [...patrimonioFullList.filter(i => normalizeStr(i.Unidade) === normalizeStr(unidade))];
+
+        const comparisonData = parsed.map(pastedItem => {
+            const { match, score } = findBestMatch(pastedItem, systemItemsInUnit);
+            return { pastedItem, bestMatch: match, score };
+        });
+        
         DOM_IMPORT.editByDescResults.classList.remove('hidden');
         document.getElementById('edit-by-desc-preview-count').textContent = parsed.length;
-        DOM_IMPORT.editByDescPreviewTableContainer.innerHTML = `
-            <table class="w-full text-sm">
-                <thead><tr class="bg-slate-100"><th class="p-2 text-left">Planilha (Desc/Tombo)</th><th class="p-2 text-left">Sistema (ID/Tombo)</th><th class="p-2 text-left">Status</th></tr></thead>
-                <tbody>
-                    <tr class="bg-yellow-100"><td class="p-2">Cadeira de Roda / 123</td><td class="p-2">Não encontrado</td><td class="p-2 text-yellow-800 font-bold">Ambiguidade</td></tr>
-                    <tr class="bg-green-100"><td class="p-2">Mesa de Escritorio / 456</td><td class="p-2">Mesa de Escrivaninha / 789</td><td class="p-2 text-green-800 font-bold">Vínculo Forte</td></tr>
-                </tbody>
-            </table>
-        `;
+        
+        // Renderiza a nova tabela de comparação (Req B)
+        renderEditByDescPreview(comparisonData);
     });
     
+    // Listeners para Ações em Massa (Req D)
+    if (DOM_IMPORT.editByDescSelectAll) {
+        DOM_IMPORT.editByDescSelectAll.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:not(:disabled)').forEach(cb => {
+                cb.checked = isChecked;
+            });
+        });
+    }
+
+    if (DOM_IMPORT.editByDescBulkApply) {
+        DOM_IMPORT.editByDescBulkApply.addEventListener('click', () => {
+            const action = DOM_IMPORT.editByDescBulkAction.value;
+            if (!action) return showNotification('Selecione uma ação em massa.', 'warning');
+
+            const checkedRows = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:checked');
+            if (checkedRows.length === 0) return showNotification('Nenhum item selecionado.', 'warning');
+
+            checkedRows.forEach(cb => {
+                const row = cb.closest('tr');
+                const select = row.querySelector('.edit-by-desc-action');
+                if (select && !select.disabled) {
+                    select.value = action;
+                }
+            });
+            updateEditByDescSummary(); // Atualiza a contagem
+            showNotification(`Ação em massa aplicada a ${checkedRows.length} itens.`, 'info');
+        });
+    }
+
+    // Listener para mudança individual de ação
+    DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('change', (e) => {
+        if (e.target.classList.contains('edit-by-desc-action')) {
+            updateEditByDescSummary();
+        }
+    });
+
+    // Listener de Confirmação (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
-        // ... (Lógica de salvamento e atualização) ...
-        showNotification('Atualização por descrição realizada (Recarregue para ver).', 'success');
-        reloadDataCallback();
+        const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
+        const itemsToUpdate = [];
+
+        actionSelects.forEach(select => {
+            if (select.value === 'update') {
+                const systemId = select.dataset.systemId;
+                const rowIndex = parseInt(select.closest('tr').dataset.rowIndex, 10);
+                const pastedItem = pastedDataForUpdate[rowIndex];
+                
+                if (systemId && pastedItem) {
+                    const newTombo = pastedItem.tombamento || pastedItem.tombo || 'S/T';
+                    const newLocal = pastedItem.local || pastedItem.localizacao || '';
+                    const newEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
+                    
+                    itemsToUpdate.push({
+                        id: systemId,
+                        changes: {
+                            Tombamento: newTombo,
+                            Localização: newLocal,
+                            Estado: newEstado,
+                            Observação: `Atualizado via "Editar por Descrição". (Tombo anterior: ${select.closest('tr').querySelector('.font-semibold.text-green-800') ? select.closest('tr').querySelector('p:nth-child(2)').textContent : 'N/A'})`,
+                            updatedAt: serverT()
+                        }
+                    });
+                }
+            }
+        });
+
+        if (itemsToUpdate.length === 0) {
+            return showNotification('Nenhum item foi marcado para "Atualizar".', 'info');
+        }
+
+        showOverlay(`Atualizando ${itemsToUpdate.length} itens...`);
+        const batch = writeBatch(db);
+
+        itemsToUpdate.forEach(item => {
+            const docRef = doc(db, 'patrimonio', item.id);
+            batch.update(docRef, item.changes);
+        });
+
+        try {
+            await batch.commit();
+            
+            // Limpa o cache para forçar o reload
+            await idb.metadata.clear(); 
+            
+            showNotification(`${itemsToUpdate.length} itens atualizados com sucesso! Recarregando...`, 'success');
+            
+            // Reseta a UI da aba
+            DOM_IMPORT.editByDescResults.classList.add('hidden');
+            DOM_IMPORT.editByDescData.value = '';
+            pastedDataForUpdate = [];
+
+            reloadDataCallback(); // Chama o reload global
+        } catch (error) {
+            hideOverlay();
+            showNotification('Erro ao salvar as atualizações.', 'error');
+            console.error('Erro ao atualizar itens:', error);
+        }
     });
 }
