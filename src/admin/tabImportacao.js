@@ -8,6 +8,58 @@ import { getState, setState } from '../state/globalStore.js';
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from '../utils/helpers.js';
 import { idb } from '../services/cache.js';
 
+/**
+ * Normaliza strings de estado de conservação para os padrões do sistema.
+ * @param {string} estadoStr - O estado lido da planilha (ex: "Avariada", "Ruim", "Bom")
+ * @returns {string} - O estado padronizado (ex: "Avariado", "Bom")
+ */
+const normalizeEstadoConservacao = (estadoStr) => {
+    // INÍCIO DA ALTERAÇÃO: Remove texto em parênteses ANTES de normalizar
+    const cleanStr = (estadoStr || '').split('(')[0].trim();
+    // FIM DA ALTERAÇÃO
+    
+    const normalized = normalizeStr(cleanStr);
+    
+    if (['avariado', 'avariada', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
+    if (normalized.startsWith('novo')) return 'Novo';
+    if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
+    if (normalized.startsWith('regular')) return 'Regular';
+    
+    if (normalized === '') return 'Regular'; // Se estiver vazio, assume Regular
+    return 'Regular'; // Padrão
+};
+
+/**
+ * INÍCIO: Adiciona função para extrair origem da doação
+ * Extrai informação de doação de colunas da planilha
+ * @param {object} item - O objeto da linha (com cabeçalhos normalizados)
+ * @returns {string} - O texto da origem da doação, se encontrado.
+ */
+const extractOrigemDoacao = (item) => {
+    // 1. Verifica se a coluna "origem da doacao" existe e tem valor
+    const origemColuna = item['origem da doacao'] || '';
+    if (origemColuna.trim() && origemColuna.trim() !== '-') {
+        return origemColuna.trim();
+    }
+    
+    // 2. Se não, verifica se "(DOAÇÃO)" está no estado de conservação
+    const estadoInput = item['estado de conservacao'] || item.estado || '';
+    const normalizedEstado = normalizeStr(estadoInput);
+    
+    if (normalizedEstado.includes('(doacao)')) {
+        return 'Doação'; // Retorna "Doação" genérico
+    }
+    
+    // 3. Se não, verifica se "(DOAÇÃO)" está na descrição
+    const descInput = item.descricao || item.item || '';
+    if (normalizeStr(descInput).includes('(doacao)')) {
+        return 'Doação';
+    }
+
+    return ''; // Nenhum encontrado
+};
+// FIM: Adiciona função
+
 const DOM_IMPORT = {
     // Nav
     subTabNav: document.querySelectorAll('#content-importacao .sub-nav-btn'),
@@ -251,21 +303,19 @@ export function setupImportacaoListeners(reloadDataCallback) {
         const data = DOM_IMPORT.replaceData.value;
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
         
-        // INÍCIO DA ALTERAÇÃO: transformHeader agora usa toLowerCase()
         const parsed = Papa.parse(data, { 
             header: true, 
             skipEmptyLines: true, 
             delimiter: '\t', 
-            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+            transformHeader: h => normalizeStr(h) // Remove acentos, espaços e converte para minúsculo
         }).data;
-        // FIM DA ALTERAÇÃO
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado.', 'error');
         
         DOM_IMPORT.replaceResults.classList.remove('hidden');
         document.getElementById('replace-preview-count').textContent = parsed.length;
         
-        // INÍCIO DA ALTERAÇÃO: Atualiza a pré-visualização para usar uma TABELA para melhor alinhamento
+        // INÍCIO DA ALTERAÇÃO: Adiciona coluna "Origem da Doação" na pré-visualização
         let previewHtml = `
             <table class="w-full text-sm">
                 <thead>
@@ -274,23 +324,35 @@ export function setupImportacaoListeners(reloadDataCallback) {
                         <th class="p-2 text-left">Tombamento</th>
                         <th class="p-2 text-left">Local</th>
                         <th class="p-2 text-left">Estado</th>
+                        <th class="p-2 text-left">Origem (Auto)</th>
                     </tr>
                 </thead>
                 <tbody>
         `;
         
         previewHtml += parsed.map(item => {
-            const desc = escapeHtml(item.descrição || item.descricao || item.item || 'S/D');
+            // Usa os nomes de coluna normalizados (sem acento)
+            const desc = escapeHtml(item.descricao || item.item || 'S/D');
             const tombo = escapeHtml(item.tombamento || item.tombo || 'S/T');
-            const local = escapeHtml(item.local || item.localização || 'N/I');
-            const estado = escapeHtml(item['estado de conservação'] || item.estado || 'Regular');
+            const local = escapeHtml(item.local || item.localizacao || 'N/I');
+            const estadoInput = item['estado de conservacao'] || item.estado || 'Regular';
+            
+            // Normaliza o valor do estado
+            const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
+            
+            // Extrai a origem da doação
+            const origemDoacao = extractOrigemDoacao(item);
             
             return `
                 <tr class="border-b">
                     <td class="p-2">${desc}</td>
                     <td class="p-2 font-mono">${tombo}</td>
                     <td class="p-2">${local}</td>
-                    <td class="p-2 font-semibold text-blue-600">${estado}</td>
+                    <td classd="p-2">
+                        <span class="font-semibold text-blue-600">${escapeHtml(estadoNormalizado)}</span>
+                        <span class="text-xs text-slate-500" title="Valor original colado">(${escapeHtml(estadoInput)})</span>
+                    </td>
+                    <td class="p-2 text-green-600 font-medium">${escapeHtml(origemDoacao)}</td>
                 </tr>
             `;
         }).join('');
@@ -317,14 +379,12 @@ export function setupImportacaoListeners(reloadDataCallback) {
         showOverlay(`Substituindo inventário de ${unidade}...`);
         
         // 1. Parse dos Novos Dados
-        // INÍCIO DA ALTERAÇÃO: transformHeader agora usa toLowerCase()
         const parsed = Papa.parse(data, { 
             header: true, 
             skipEmptyLines: true, 
             delimiter: '\t', 
-            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+            transformHeader: h => normalizeStr(h) // Remove acentos, espaços e converte para minúsculo
         }).data;
-        // FIM DA ALTERAÇÃO
         
         // 2. Apagar itens existentes
         try {
@@ -349,20 +409,27 @@ export function setupImportacaoListeners(reloadDataCallback) {
             parsed.forEach(item => {
                 const docRef = doc(collection(db, 'patrimonio'));
                 
-                // INÍCIO DA ALTERAÇÃO: Lógica de criação de newItem atualizada
+                // INÍCIO DA ALTERAÇÃO: Lógica de criação de newItem atualizada com origem da doação
+                const estadoInput = item['estado de conservacao'] || item.estado || 'Regular';
+                const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
+                const origemDoacao = extractOrigemDoacao(item);
+
                 const newItem = {
                     id: docRef.id,
                     Tombamento: item.tombamento || item.tombo || 'S/T', 
-                    Descrição: item.descrição || item.descricao || item.item || 'Item sem descrição',
+                    Descrição: item.descricao || item.item || 'Item sem descrição',
                     Tipo: tipo, 
                     Unidade: unidade, 
-                    Localização: item.local || item.localização || '',
-                    Fornecedor: '', NF: '', 'Origem da Doação': '',
-                    Estado: item['estado de conservação'] || item.estado || 'Regular', 
+                    Localização: item.local || item.localizacao || '',
+                    Fornecedor: '', 
+                    NF: '', 
+                    'Origem da Doação': origemDoacao, // Salva a origem extraída
+                    Estado: estadoNormalizado, // Salva o estado normalizado
                     Quantidade: 1, 
-                    Observação: 'Substituição em massa.',
+                    Observação: `Substituição em massa. (Estado original: ${estadoInput})`,
                     isPermuta: false,
-                    createdAt: serverT(), updatedAt: serverT()
+                    createdAt: serverT(), 
+                    updatedAt: serverT()
                 };
                 // FIM DA ALTERAÇÃO
 
@@ -397,7 +464,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
             header: true, 
             skipEmptyLines: true, 
             delimiter: '\t', 
-            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+            transformHeader: h => normalizeStr(h) // Garante cabeçalhos normalizados
         }).data;
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
@@ -424,4 +491,3 @@ export function setupImportacaoListeners(reloadDataCallback) {
         reloadDataCallback();
     });
 }
-
