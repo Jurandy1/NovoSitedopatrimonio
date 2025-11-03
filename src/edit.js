@@ -216,7 +216,15 @@ function populateEditableInventoryTab() {
     const filtroEstado = document.getElementById('edit-filter-estado');
 
     // Popula filtros
-    const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort();
+    // const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort(); // OLD
+    const tiposMap = new Map(); // NEW: Para deduplicar
+    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!tiposMap.has(normalized)) {
+            tiposMap.set(normalized, tipo.trim());
+        }
+    });
+    const tipos = [...tiposMap.values()].sort(); // NEW: Lista única
     const estados = ['Novo', 'Bom', 'Regular', 'Avariado', 'N/D'];
     
     filtroTipo.innerHTML = '<option value="">Todos os Tipos</option>' + tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
@@ -228,9 +236,23 @@ function populateEditableInventoryTab() {
         currentEditFilter.tipo = selectedTipo;
         const filtroUnidade = document.getElementById('edit-filter-unidade');
         
+        /* OLD
         const unidades = selectedTipo
             ? [...new Set(patrimonioFullList.filter(i => i.Tipo === selectedTipo).map(i => i.Unidade).filter(Boolean))].sort()
             : [];
+        */
+        // NEW: Deduplicar unidades
+        const unidadesMap = new Map();
+        (selectedTipo
+            ? patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean) // Compara normalizado
+            : []
+        ).forEach(unidade => {
+            const normalized = normalizeStr(unidade);
+            if (!unidadesMap.has(normalized)) {
+                unidadesMap.set(normalized, unidade.trim());
+            }
+        });
+        const unidades = [...unidadesMap.values()].sort(); // NEW: Lista única
             
         filtroUnidade.innerHTML = '<option value="">Todas as Unidades</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
         filtroUnidade.disabled = !selectedTipo;
@@ -311,7 +333,16 @@ function renderEditableTable() {
  */
 function populateUnitMappingTab() {
     const { patrimonioFullList } = getState();
-    const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort();
+    // const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort(); // OLD
+    // NEW: Deduplicar tipos
+    const tiposMap = new Map();
+    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!tiposMap.has(normalized)) {
+            tiposMap.set(normalized, tipo.trim());
+        }
+    });
+    const tipos = [...tiposMap.values()].sort(); // NEW: Lista única
     DOM.mapFilterTipo.innerHTML = '<option value="">Todos os Tipos</option>' + tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
     
     // Chama as funções de população (adaptadas do `edit.js` antigo)
@@ -329,9 +360,17 @@ function updateSystemUnitOptions() {
     const selectedType = DOM.mapFilterTipo.value;
     const linkedSystemUnits = Object.keys(unitMapping);
     
+    // CORREÇÃO: Pega todos os nomes de Tipos normalizados
+    const normalizedTipos = new Set(patrimonioFullList.map(item => normalizeStr(item.Tipo)).filter(Boolean));
+
     const systemUnits = [...normalizedSystemUnits.values()].filter(unit => {
+        // CORREÇÃO: Filtra unidades cujo nome é também um nome de tipo (ex: "SEDE")
+        if (normalizedTipos.has(normalizeStr(unit))) {
+            return false; 
+        }
+        
         const item = patrimonioFullList.find(i => i.Unidade === unit);
-        const isCorrectType = !selectedType || item?.Tipo === selectedType;
+        const isCorrectType = !selectedType || (item && item.Tipo === selectedType); // Adicionado (item && ...)
         // Mostra apenas unidades que não estão mapeadas
         return isCorrectType && !linkedSystemUnits.includes(unit);
     }).sort();
@@ -427,7 +466,16 @@ function renderSavedMappings() {
 function populateReconciliationTab() {
     const { patrimonioFullList } = getState();
 
-    const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort();
+    // const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort(); // OLD
+    // NEW: Deduplicar tipos
+    const tiposMap = new Map();
+    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!tiposMap.has(normalized)) {
+            tiposMap.set(normalized, tipo.trim());
+        }
+    });
+    const tipos = [...tiposMap.values()].sort(); // NEW: Lista única
     DOM.conciliarFilterTipo.innerHTML = '<option value="">Selecione um Tipo</option>' + tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
 
     // O filtro de unidade será populado quando o tipo for selecionado
@@ -981,14 +1029,30 @@ async function savePendingLinks(context = 'unidade') {
 function populateSobrantesTab() {
     const { patrimonioFullList, reconciledUnits } = getState();
     // Tipos de unidades que já foram conciliadas
-    const reconciledTypes = [...new Set(patrimonioFullList
-        .filter(i => reconciledUnits.includes(i.Unidade))
-        .map(i => i.Tipo).filter(Boolean))].sort();
+    // const reconciledTypes = [...new Set(patrimonioFullList.filter(i => reconciledUnits.includes(i.Unidade)).map(i => i.Tipo).filter(Boolean))].sort(); // OLD
+    // NEW: Deduplicar tipos
+    const reconciledTypesMap = new Map();
+    patrimonioFullList.filter(i => reconciledUnits.includes(i.Unidade)).map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!reconciledTypesMap.has(normalized)) {
+            reconciledTypesMap.set(normalized, tipo.trim());
+        }
+    });
+    const reconciledTypes = [...reconciledTypesMap.values()].sort(); // NEW: Lista única
         
     DOM.sobrasFilterTipo.innerHTML = '<option value="">Selecione um Tipo</option>' + reconciledTypes.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
 
     // Tipos de todos os itens (para filtrar sobras do GIAP)
-    const allTypes = [...new Set(patrimonioFullList.map(i => i.Tipo).filter(Boolean))].sort();
+    // const allTypes = [...new Set(patrimonioFullList.map(i => i.Tipo).filter(Boolean))].sort(); // OLD
+    // NEW: Deduplicar tipos
+    const allTypesMap = new Map();
+    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!allTypesMap.has(normalized)) {
+            allTypesMap.set(normalized, tipo.trim());
+        }
+    });
+    const allTypes = [...allTypesMap.values()].sort(); // NEW: Lista única
     DOM.sobrasGiapTypeFilter.innerHTML = '<option value="">Todos os Tipos</option>' + allTypes.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
 }
 
@@ -1106,7 +1170,16 @@ function renderItensATombar() {
 
 function populateImportAndReplaceTab() {
     const { patrimonioFullList } = getState();
-    const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort();
+    // const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort(); // OLD
+    // NEW: Deduplicar tipos
+    const tiposMap = new Map();
+    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+        const normalized = normalizeStr(tipo);
+        if (!tiposMap.has(normalized)) {
+            tiposMap.set(normalized, tipo.trim());
+        }
+    });
+    const tipos = [...tiposMap.values()].sort(); // NEW: Lista única
     
     const selects = [
         document.getElementById('mass-transfer-tipo'),
@@ -1649,13 +1722,44 @@ function setupListeners() {
     // Listeners de navegação sub-abas
     document.querySelectorAll('.sub-nav-btn').forEach(button => {
         button.addEventListener('click', (e) => {
-            const subtabName = e.currentTarget.dataset.subtab || e.currentTarget.dataset.subtabConciliar;
-            const parent = e.currentTarget.closest('.flex.border-b');
-            parent.querySelectorAll('.sub-nav-btn').forEach(btn => btn.classList.remove('active'));
-            e.currentTarget.classList.add('active');
+            // const subtabName = e.currentTarget.dataset.subtab || e.currentTarget.dataset.subtabConciliar; // OLD
+            // const parent = e.currentTarget.closest('.flex.border-b'); // OLD
+            // parent.querySelectorAll('.sub-nav-btn').forEach(btn => btn.classList.remove('active')); // OLD
+            // e.currentTarget.classList.add('active'); // OLD
             
             // Lógica para mostrar/esconder painéis da sub-aba
             // (Esta lógica está no `edit.js` antigo e parece correta no novo)
+
+            // CORREÇÃO: Adicionando lógica de clique das sub-abas
+            const btn = e.currentTarget;
+            const parentNav = btn.closest('.flex.border-b');
+            const parentCard = btn.closest('.card');
+
+            // Remove active de todos os botões irmãos
+            parentNav.querySelectorAll('.sub-nav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            if (btn.dataset.subtabConciliar) {
+                // Lógica para a aba "Conciliar"
+                const subTab = btn.dataset.subtabConciliar;
+                parentCard.querySelectorAll('div[id^="subtab-conciliar-"]').forEach(pane => {
+                    pane.classList.toggle('hidden', pane.id !== `subtab-conciliar-${subTab}`);
+                });
+                
+                // Resetar estado ao trocar de sub-aba
+                linksToCreate = []; selSys = null; selGiap = null;
+                
+                if(subTab === 'itens_a_tombar') renderItensATombar();
+                if(subTab === 'conciliacao_sobras') populateSobrantesTab();
+                // Se for 'conciliacao_unidade', não faz nada, espera o "Carregar"
+                
+            } else if (btn.dataset.subtab) {
+                // Lógica para a aba "Importação"
+                const subTab = btn.dataset.subtab;
+                parentCard.querySelectorAll('div[id^="subtab-content-"]').forEach(pane => {
+                    pane.classList.toggle('hidden', pane.id !== `subtab-content-${subTab}`);
+                });
+            }
         });
     });
 
@@ -1687,7 +1791,16 @@ function setupListeners() {
                     unitSelect.disabled = true;
                     return;
                 }
-                const unidades = [...new Set(patrimonioFullList.filter(i => i.Tipo === selectedTipo).map(i => i.Unidade).filter(Boolean))].sort();
+                // const unidades = [...new Set(patrimonioFullList.filter(i => i.Tipo === selectedTipo).map(i => i.Unidade).filter(Boolean))].sort(); // OLD
+                // NEW: Deduplicar unidades
+                const unidadesMap = new Map();
+                patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean).forEach(unidade => { // Compara normalizado
+                    const normalized = normalizeStr(unidade);
+                    if (!unidadesMap.has(normalized)) {
+                        unidadesMap.set(normalized, unidade.trim());
+                    }
+                });
+                const unidades = [...unidadesMap.values()].sort(); // NEW: Lista única
                 unitSelect.innerHTML = '<option value="">Selecione uma Unidade</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
                 unitSelect.disabled = false;
             });
@@ -1701,13 +1814,27 @@ function setupListeners() {
         // A lógica para eles já está no arquivo `src/edit.js` novo) ...
     }
     setupImportAndReplaceListeners();
+
+    // CORREÇÃO: Listener para "Tombos Sobrando"
+    document.getElementById('suggest-sobrando').addEventListener('click', () => {
+        const keyword = normalizeStr(document.getElementById('leftover-keyword').value);
+        const tomboFilter = normalizeStr(document.getElementById('leftover-tombo').value);
+        
+        const leftovers = getGlobalLeftovers(); // Esta função já existe e está correta
+        
+        const filtered = leftovers.filter(item => {
+            const tomboItem = normalizeTombo(item.TOMBAMENTO);
+            const descItem = normalizeStr(item.Descrição || item.Espécie);
+            const matchesKeyword = !keyword || descItem.includes(keyword);
+            const matchesTombo = !tomboFilter || tomboItem.includes(tomboFilter);
+            return matchesKeyword && matchesTombo;
+        });
+
+        document.getElementById('total-sobrando').textContent = filtered.length;
+        renderList('sobrando-list', filtered, 'TOMBAMENTO', 'Descrição', null, 'sobras');
+    });
 }
 
 
 // --- INICIALIZAÇÃO ---
-function init() {
-    subscribe(updateUIFromState);
-    setupListeners();
-}
 
-document.addEventListener('DOMContentLoaded', init);
