@@ -678,6 +678,10 @@
     </div>
 
     <!-- Script da Página (Módulo) -->
-    <script type="module" src="src/edit.js"></script>
+    <!-- 
+      CORREÇÃO: Adicionado ?v=1.2.1 para forçar o navegador a baixar a versão mais recente 
+      do script, resolvendo o erro de cache que estava causando o travamento.
+    -->
+    <script type="module" src="src/edit.js?v=1.2.1"></script>
 </body>
 </html>
