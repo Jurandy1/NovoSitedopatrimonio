@@ -566,6 +566,7 @@ function updateEditByDescSummary() {
     });
 
     DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${toCreateCount} para CRIAR, ${notFoundCount} MANUAIS.`;
+    // O botão só fica desabilitado se a soma das ações não for maior que zero
     DOM_IMPORT.confirmEditByDescBtn.disabled = (toUpdateCount + toCreateCount) === 0;
 }
 // FIM DA ALTERAÇÃO
@@ -1112,24 +1113,30 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
     // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
-        // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
-        // FIM DA ALTERAÇÃO
         const itemsToUpdate = [];
         const itemsToCreate = []; // Novo array para itens a criar (Req 5)
         const { fieldUpdates, comparisonData } = multiUnitImportData;
         let updateCount = 0; // Contagem para o overlay
 
         actionSelects.forEach(select => {
+            const row = select.closest('tr');
+            const rowCheckbox = row.querySelector('.edit-by-desc-row-checkbox');
             const action = select.value;
-            const systemId = select.dataset.systemId;
-            const rowIndex = parseInt(select.closest('tr').dataset.rowIndex, 10);
-            // INÍCIO DA ALTERAÇÃO: (Req 2) Pega 'updateDescription' da linha de dados
-            const { pastedItem, bestMatch, updateDescription, systemUnitName } = comparisonData[rowIndex];
-            // FIM DA ALTERAÇÃO
             
+            // --- NOVO CHECK DE SEGURANÇA CRÍTICO (CORREÇÃO DA TRAGÉDIA) ---
+            // Ação só é processada se o SELECT não for 'ignore' E o CHECKBOX da linha estiver marcado.
+            if (action === 'ignore' || !rowCheckbox || !rowCheckbox.checked) {
+                return; 
+            }
+            // -----------------------------------------------------------------
+
+            const systemId = select.dataset.systemId;
+            const rowIndex = parseInt(row.dataset.rowIndex, 10);
+            const { pastedItem, bestMatch, updateDescription, systemUnitName } = comparisonData[rowIndex];
+
             if (action === 'create_new') {
-                // Lógica para criar novo item (Req 5)
+                // Lógica para criar novo item (Sobrando)
                 const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
 
                 // Permite a criação mesmo sem Tombo (pastedTombo pode ser vazio/S/T)
@@ -1205,7 +1212,8 @@ export function setupImportacaoListeners(reloadDataCallback) {
         });
 
         if (updateCount === 0) {
-            return showNotification('Nenhum item foi marcado para "Atualizar" ou "Criar Novo Item".', 'info');
+            // Mensagem de erro atualizada
+            return showNotification('Nenhum item foi marcado (checkbox) para "Atualizar" ou "Criar Novo Item".', 'info');
         }
 
         showOverlay(`Processando ${itemsToUpdate.length} atualizações e ${itemsToCreate.length} criações...`);
