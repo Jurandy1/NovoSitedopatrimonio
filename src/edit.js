@@ -378,6 +378,8 @@ function updateSystemUnitOptions() {
     DOM.mapSystemUnitSelect.innerHTML = systemUnits.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
 }
 
+// CORREÇÃO: Removido o bloco de comentário `/** */` que causava erro de sintaxe.
+
 /**
  * CORREÇÃO: Função adaptada do `edit.js` antigo.
  * Popula a lista de Unidades GIAP, com sugestões e filtrando já mapeadas.
@@ -1837,4 +1839,10 @@ function setupListeners() {
 
 
 // --- INICIALIZAÇÃO ---
+function init() {
+    subscribe(updateUIFromState);
+    setupListeners();
+}
+
+document.addEventListener('DOMContentLoaded', init);
 
