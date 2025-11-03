@@ -276,16 +276,22 @@ async function handleUpdateAllFromGiap() {
     const itemsToReview = [];
 
     patrimonioFullList.forEach(item => {
+        // (Req #5/6) Ignora itens já marcados para verificação
+        if (item.Observação?.includes('Verificar tombo')) {
+            return;
+        }
+
         const normalizedTombo = normalizeTombo(item.Tombamento);
-        if (!normalizedTombo || normalizedTombo === 's/t') {
-            return; // Ignora S/T
+        // Ignora S/T e Permuta
+        if (!normalizedTombo || normalizedTombo === 's/t' || item.isPermuta) {
+            return; 
         }
 
         const giapItem = giapMapAllItems.get(normalizedTombo);
 
         if (giapItem) {
             const giapDesc = giapItem.Descrição || giapItem.Espécie;
-            // Verifica se a descrição é diferente
+            // (Req #6) Verifica se a descrição é diferente
             if (normalizeStr(item.Descrição) !== normalizeStr(giapDesc)) {
                 itemsToReview.push({ item, giapItem, status: 'name-change' });
             }
@@ -310,47 +316,88 @@ function renderUpdateAllList(itemsToReview) {
         return;
     }
 
-    const notFoundHtml = itemsToReview
-        .filter(r => r.status === 'not-found')
-        .map(r => `
-            <div class="p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-                <p class="font-semibold text-red-800">Não Encontrado no GIAP</p>
-                <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
-                <p class="text-sm"><strong>Descrição:</strong> ${escapeHtml(r.item.Descrição)}</p>
-            </div>
-        `).join('');
+    // (Req #3) Bulk Actions HTML
+    const bulkActionsHtml = `
+        <div id="update-all-bulk-actions" class="p-3 bg-slate-100 rounded-lg flex flex-wrap items-center gap-4">
+            <label class="flex items-center font-medium">
+                <input type="checkbox" id="update-all-select-all" class="h-4 w-4 mr-2">
+                Selecionar Todos
+            </label>
+            <select id="update-all-bulk-action-select" class="p-2 border rounded-lg bg-white text-sm">
+                <option value="">-- Ação em Massa --</option>
+                <option value="update">Atualizar para Nome do GIAP</option>
+                <option value="keep">Manter Nome Atual</option>
+                <option value="mark-permuta">Marcar como PERMUTA</option>
+                <option value="mark-for-check">Marcar 'Verificar Tombo'</option>
+            </select>
+            <button id="update-all-bulk-apply-btn" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">Aplicar aos Selecionados</button>
+        </div>`;
 
+    // (Req #1, #2, #4) Updated Name Change HTML
     const nameChangeHtml = itemsToReview
         .filter(r => r.status === 'name-change')
         .map(r => `
             <div class="p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded-r-lg">
-                <p class="font-semibold text-yellow-800">Divergência na Descrição</p>
-                <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
-                <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
-                    <div>
-                        <p class="font-medium">Descrição Atual no Sistema:</p>
-                        <p class="p-2 bg-white rounded border">${escapeHtml(r.item.Descrição)}</p>
+                <div class="flex items-start">
+                    <input type="checkbox" class="update-all-checkbox mt-1 h-5 w-5" data-id="${escapeHtml(r.item.id)}">
+                    <div class="ml-3 flex-1">
+                        <p class="font-semibold text-yellow-800">Divergência na Descrição</p>
+                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)} | <strong>Estado Atual:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
+                        <p class="text-xs"><strong>Espécie (GIAP):</strong> ${escapeHtml(r.giapItem.Espécie || 'N/A')} | <strong>Cadastro (GIAP):</strong> ${escapeHtml(r.giapItem.Cadastro || 'N/A')}</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">
+                            <div>
+                                <p class="font-medium">Descrição Atual no Sistema:</p>
+                                <p class="p-2 bg-white rounded border">${escapeHtml(r.item.Descrição)}</p>
+                            </div>
+                            <div>
+                                <p class="font-medium">Descrição na Planilha GIAP:</p>
+                                <p class="p-2 bg-white rounded border">${escapeHtml(r.giapItem.Descrição || r.giapItem.Espécie)}</p>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <label class="font-medium text-sm">Ação:</label>
+                            <select class="update-choice w-full p-2 border rounded-lg bg-white" data-id="${escapeHtml(r.item.id)}">
+                                <option value="keep" selected>Manter Nome Atual (e não atualizar outros dados)</option>
+                                <option value="update">Atualizar para Nome do GIAP (e todos os outros dados)</option>
+                                <option value="mark-permuta">Marcar como PERMUTA (Remove Tombo)</option>
+                            </select>
+                        </div>
                     </div>
-                     <div>
-                        <p class="font-medium">Descrição na Planilha GIAP:</p>
-                        <p class="p-2 bg-white rounded border">${escapeHtml(r.giapItem.Descrição || r.giapItem.Espécie)}</p>
-                    </div>
-                </div>
-                <div class="mt-2">
-                    <label class="font-medium text-sm">Ação:</label>
-                    <select class="update-choice w-full p-2 border rounded-lg bg-white" data-id="${r.item.id}">
-                        <option value="keep" selected>Manter Nome Atual (e não atualizar outros dados)</option>
-                        <option value="update">Atualizar para Nome do GIAP (e todos os outros dados)</option>
-                    </select>
                 </div>
             </div>
         `).join('');
 
+    // (Req #1, #5) Updated Not Found HTML
+    const notFoundHtml = itemsToReview
+        .filter(r => r.status === 'not-found')
+        .map(r => `
+            <div class="p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+                <div class="flex items-start">
+                    <input type="checkbox" class="update-all-checkbox mt-1 h-5 w-5" data-id="${escapeHtml(r.item.id)}">
+                    <div class="ml-3 flex-1">
+                        <p class="font-semibold text-red-800">Não Encontrado no GIAP</p>
+                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)}</p>
+                        <p class="text-sm"><strong>Descrição:</strong> ${escapeHtml(r.item.Descrição)} | <strong>Estado:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
+                        <div class="mt-2">
+                            <label class="font-medium text-sm">Ação:</label>
+                            <select class="update-choice-notfound w-full p-2 border rounded-lg bg-white" data-id="${escapeHtml(r.item.id)}">
+                                <option value="ignore" selected>Ignorar por enquanto</option>
+                                <option value="mark-for-check">Marcar 'Verificar Tombo' (e não mostrar mais)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+    // Combine all HTML
     DOM.updateAllList.innerHTML = `
-        ${nameChangeHtml ? `<div><h4 class="text-lg font-semibold mb-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
-        ${notFoundHtml ? `<div class="mt-6"><h4 class="text-lg font-semibold mb-2">Itens Não Encontrados</h4><div class="space-y-3">${notFoundHtml}</div></div>` : ''}
+        ${bulkActionsHtml}
+        ${nameChangeHtml ? `<div classs="mt-4"><h4 class="text-lg font-semibold my-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
+        ${notFoundHtml ? `<div class="mt-6"><h4 class="text-lg font-semibold my-2">Itens Não Encontrados</h4><div class="space-y-3">${notFoundHtml}</div></div>` : ''}
     `;
 }
+
 
 /**
  * Manipulador de clique para o botão "Confirmar" do novo modal.
@@ -358,7 +405,9 @@ function renderUpdateAllList(itemsToReview) {
  */
 async function handleUpdateAllConfirm() {
     const { giapMapAllItems, patrimonioFullList } = getState();
-    const selects = DOM.updateAllList.querySelectorAll('select.update-choice');
+    // (Req #4, #5) Get all selects from both lists
+    const selects = DOM.updateAllList.querySelectorAll('select.update-choice, select.update-choice-notfound');
+    
     if (selects.length === 0) {
         showNotification('Nenhuma ação selecionada.', 'info');
         DOM.updateAllGiapModal.classList.add('hidden');
@@ -372,12 +421,11 @@ async function handleUpdateAllConfirm() {
     selects.forEach(select => {
         const id = select.dataset.id;
         const choice = select.value;
+        const itemRef = doc(db, 'patrimonio', id);
+        const item = patrimonioFullList.find(i => i.id === id); // Get item for context
 
         if (choice === 'update') {
-            const itemRef = doc(db, 'patrimonio', id);
-            const item = patrimonioFullList.find(i => i.id === id);
             const giapItem = giapMapAllItems.get(normalizeTombo(item.Tombamento));
-            
             if (giapItem) {
                 updateCount++;
                 batch.update(itemRef, {
@@ -386,14 +434,29 @@ async function handleUpdateAllConfirm() {
                     NF: giapItem.NF || '',
                     'Nome Fornecedor': giapItem['Nome Fornecedor'] || '',
                     'Tipo Entrada': giapItem['Tipo Entrada'] || '',
-                    Unidade_Planilha: giapItem.Unidade || '', // Salva a unidade original da planilha
+                    Unidade_Planilha: giapItem.Unidade || '', 
                     'Valor NF': giapItem['Valor NF'] || '',
                     Espécie: giapItem.Espécie || '',
-                    Status_Planilha: giapItem.Status || '', // Salva o status original da planilha
+                    Status_Planilha: giapItem.Status || '', 
                     updatedAt: serverT()
                 });
             }
+        } else if (choice === 'mark-permuta') { // (Req #4)
+            updateCount++;
+            batch.update(itemRef, { 
+                Tombamento: 'PERMUTA', 
+                isPermuta: true, 
+                Observação: 'Marcado como Permuta via auditoria.', 
+                updatedAt: serverT() 
+            });
+        } else if (choice === 'mark-for-check') { // (Req #5)
+            updateCount++;
+            batch.update(itemRef, { 
+                Observação: 'Verificar tombo (Não encontrado no GIAP)', 
+                updatedAt: serverT() 
+            });
         }
+        // 'keep' and 'ignore' do nothing, which is correct.
     });
 
     if (updateCount === 0) {
@@ -407,7 +470,7 @@ async function handleUpdateAllConfirm() {
         await batch.commit();
         showNotification(`${updateCount} itens atualizados com sucesso! Recarregando...`, 'success');
         DOM.updateAllGiapModal.classList.add('hidden');
-        loadData(true); // Força recarregamento completo
+        loadData(true); // (Req #6) Force reload
     } catch (e) {
         hideOverlay();
         showNotification('Erro ao salvar atualizações em lote.', 'error');
@@ -552,10 +615,56 @@ function setupListeners() {
     DOM.updateAllFromGiapBtn.addEventListener('click', handleUpdateAllFromGiap);
     DOM.updateAllConfirmBtn.addEventListener('click', handleUpdateAllConfirm);
     
-    // Fechar o novo modal
+    // Fechar o novo modal e listeners de ações em massa
     DOM.updateAllGiapModal.addEventListener('click', (e) => {
-        if (e.target.matches('.js-close-modal-update-all') || e.target.matches('.modal-overlay')) {
+        const target = e.target;
+        
+        if (target.matches('.js-close-modal-update-all') || target.matches('.modal-overlay')) {
             DOM.updateAllGiapModal.classList.add('hidden');
+        }
+
+        // (Req #3) Bulk Select All
+        if (target.id === 'update-all-select-all') {
+            const isChecked = target.checked;
+            DOM.updateAllList.querySelectorAll('.update-all-checkbox').forEach(cb => {
+                cb.checked = isChecked;
+            });
+        }
+
+        // (Req #3) Bulk Apply Action
+        if (target.id === 'update-all-bulk-apply-btn') {
+            const action = document.getElementById('update-all-bulk-action-select').value;
+            if (!action) {
+                return showNotification('Selecione uma ação em massa para aplicar.', 'warning');
+            }
+            
+            const checkedBoxes = DOM.updateAllList.querySelectorAll('.update-all-checkbox:checked');
+            if (checkedBoxes.length === 0) {
+                return showNotification('Nenhum item selecionado.', 'warning');
+            }
+            
+            let appliedCount = 0;
+            checkedBoxes.forEach(cb => {
+                const id = cb.dataset.id;
+                
+                // Tenta aplicar a ações de "Divergência"
+                if (action === 'update' || action === 'keep' || action === 'mark-permuta') {
+                    const select = DOM.updateAllList.querySelector(`select.update-choice[data-id="${id}"]`);
+                    if (select) {
+                        select.value = action;
+                        appliedCount++;
+                    }
+                // Tenta aplicar a ações de "Não Encontrado"
+                } else if (action === 'mark-for-check') {
+                     const select = DOM.updateAllList.querySelector(`select.update-choice-notfound[data-id="${id}"]`);
+                    if (select) {
+                        select.value = action;
+                        appliedCount++;
+                    }
+                }
+            });
+            
+            showNotification(`Ação aplicada a ${appliedCount} item(ns) compatíveis. Clique em "Confirmar" para salvar.`, 'info');
         }
     });
     // FIM DA ALTERAÇÃO
@@ -567,3 +676,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
