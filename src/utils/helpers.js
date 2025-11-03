@@ -14,7 +14,9 @@ export function showNotification(message, type = 'info', duration = 3000) {
     notification.className = `notification-toast ${type}`;
     notification.textContent = message;
     document.body.appendChild(notification);
+
     setTimeout(() => notification.classList.add('show'), 10);
+
     setTimeout(() => {
         notification.classList.remove('show');
         setTimeout(() => notification.remove(), 500);
@@ -46,10 +48,11 @@ export function hideOverlay() {
 
 /**
  * Normaliza uma string (remove acentos, espaços extras e converte para minúsculas).
- * @param {string} str 
+ * @param {string} str
  * @returns {string}
  */
-export const normalizeStr = (str) => (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+export const normalizeStr = (str) =>
+    (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
 /**
  * Cria uma versão "debounced" de uma função (atrasa sua execução).
@@ -70,16 +73,27 @@ export const debounce = (func, delay) => {
  * @param {string} unsafe - A string a ser escapada.
  * @returns {string}
  */
-export const escapeHtml = (unsafe) => (unsafe === undefined || unsafe === null) ? '' : unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+export const escapeHtml = (unsafe) =>
+    unsafe === undefined || unsafe === null
+        ? ''
+        : unsafe
+              .toString()
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#039;');
 
 /**
  * Converte uma string de moeda brasileira (R$) para um número.
- * @param {string} value 
+ * @param {string} value
  * @returns {number}
  */
 export const parseCurrency = (value) => {
     if (typeof value !== 'string' || value.trim() === '') return 0;
-    return parseFloat(value.replace('R$', '').replace(/\./g, '').replace(',', '.').trim()) || 0;
+    return parseFloat(
+        value.replace('R$', '').replace(/\./g, '').replace(',', '.').trim()
+    ) || 0;
 };
 
 /**
@@ -101,7 +115,7 @@ export const normalizeTombo = (tombo) => {
 /**
  * Analisa o campo 'Estado e Origem da Doação' e separa as informações.
  * @param {string} texto - O texto do campo 'Estado e Origem da Doação'
- * @returns {{estado: string, origem: string}} 
+ * @returns {{estado: string, origem: string}}
  */
 export function parseEstadoEOrigem(texto) {
     const textoCru = (texto || '').trim();
@@ -115,9 +129,12 @@ export function parseEstadoEOrigem(texto) {
         if (normalizeStr(textoCru).startsWith(normalizeStr(estado))) {
             estadoFinal = estado;
             let resto = textoCru.substring(estado.length).trim();
-            
+
             // Remove parênteses/colchetes e hífens que separam o estado da origem
-            if ((resto.startsWith('(') && resto.endsWith(')')) || (resto.startsWith('[') && resto.endsWith(']'))) {
+            if (
+                (resto.startsWith('(') && resto.endsWith(')')) ||
+                (resto.startsWith('[') && resto.endsWith(']'))
+            ) {
                 resto = resto.substring(1, resto.length - 1).trim();
             } else if (resto.startsWith('-')) {
                 resto = resto.substring(1).trim();
@@ -125,30 +142,37 @@ export function parseEstadoEOrigem(texto) {
 
             if (resto) {
                 const restoNormalizado = normalizeStr(resto);
-                // Verifica se a origem está claramente marcada como doação
-                if (restoNormalizado.startsWith('doação estado ma') || restoNormalizado.startsWith('doacao estado ma')) {
+                if (
+                    restoNormalizado.startsWith('doação estado ma') ||
+                    restoNormalizado.startsWith('doacao estado ma')
+                ) {
                     origemFinal = 'Doação ESTADO MA';
-                } else if (restoNormalizado.startsWith('doação ma') || restoNormalizado.startsWith('doacao ma')) {
+                } else if (
+                    restoNormalizado.startsWith('doação ma') ||
+                    restoNormalizado.startsWith('doacao ma')
+                ) {
                     origemFinal = 'Doação MA';
-                } else if (restoNormalizado.startsWith('doação') || restoNormalizado.startsWith('doacao')) {
-                    // Pega o resto do texto após "doação"
+                } else if (
+                    restoNormalizado.startsWith('doação') ||
+                    restoNormalizado.startsWith('doacao')
+                ) {
                     origemFinal = resto.replace(/^(doação|doacao)\s*/i, '').trim();
                 } else {
-                    origemFinal = resto.trim(); // Se for apenas um texto, assume que é a origem
+                    origemFinal = resto.trim();
                 }
             }
             return { estado: estadoFinal, origem: origemFinal || '' };
         }
     }
-    
+
     // Se o texto é apenas o estado (ex: "Bom")
     for (const estado of validEstados) {
         if (normalizeStr(textoCru) === normalizeStr(estado)) {
             return { estado: estado, origem: '' };
         }
     }
-    
-    // Se não for nenhum estado conhecido, assume regular e o texto como origem
+
+    // Se não for nenhum estado conhecido, assume Regular e o texto como origem
     const normalized = normalizeStr(textoCru);
     if (normalized.includes('doação estado ma') || normalized.includes('doacao estado ma')) {
         origemFinal = 'Doação ESTADO MA';
@@ -157,10 +181,12 @@ export function parseEstadoEOrigem(texto) {
     } else if (normalized.includes('doação') || normalized.includes('doacao')) {
         origemFinal = textoCru.replace(/^(doação|doacao)\s*/i, '').trim();
     } else if (textoCru.includes('(') || textoCru.includes('[')) {
-        // Tentativa de extrair origem de texto complexo (ex: CRAS VINHAS... BOM (DOAÇÃO ESTADO MA)
         const match = textoCru.match(/\(([^)]+doação[^)]+)\)|\[([^\]]+doação[^\]]+)\]/i);
         if (match) {
-            origemFinal = (match[1] || match[2]).trim().replace(/^(doação|doacao)\s*/i, '').trim();
+            origemFinal = (match[1] || match[2])
+                .trim()
+                .replace(/^(doação|doacao)\s*/i, '')
+                .trim();
         }
     }
 
@@ -168,18 +194,19 @@ export function parseEstadoEOrigem(texto) {
 }
 
 /**
- * Converte data em formato DD/MM/AAAA para objeto Date.
- * @param {string} dateStr - Data no formato DD/MM/AAAA.
+ * Converte data em formato DD/MM/AAAA ou ISO (AAAA-MM-DD) para objeto Date.
+ * @param {string} dateStr - Data no formato DD/MM/AAAA ou ISO.
  * @returns {Date}
  */
 export function parsePtBrDate(dateStr) {
-    if (!dateStr || typeof dateStr !== 'string') return new Date(0); 
+    if (!dateStr || typeof dateStr !== 'string') return new Date(0);
+
     const parts = dateStr.split('/');
     if (parts.length === 3) {
         return new Date(parts[2], parts[1] - 1, parts[0]);
     }
     const isoParts = dateStr.split('-');
-    if(isoParts.length === 3) {
+    if (isoParts.length === 3) {
         return new Date(isoParts[0], isoParts[1] - 1, isoParts[2]);
     }
     return new Date(0);
