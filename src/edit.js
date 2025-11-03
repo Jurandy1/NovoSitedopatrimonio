@@ -36,7 +36,6 @@ const DOM = {
 -import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT } from './services/firebase.js';
 +import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
  import { loadGiapInventory } from './services/giapService.js';
- import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
     subTabNavConciliar: document.querySelectorAll('#content-conciliar .sub-nav-btn'),
     subTabNavImportacao: document.querySelectorAll('#content-importacao .sub-nav-btn'),
 
