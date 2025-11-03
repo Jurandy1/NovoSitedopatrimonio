@@ -284,42 +284,54 @@ function processUnitMappingAndLoadItems() {
         const pastedUnitName = pastedItem.unidade || '';
         const systemUnitName = multiUnitImportData.unitMap.get(pastedUnitName);
 
-        // Se a unidade não foi mapeada ou foi ignorada, pula o item
+        // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO) ---
+        // 1. Ignora se não tem Tombo Válido na planilha
+        const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
+        if (!pastedTombo || pastedTombo.toLowerCase() === 's/t') {
+             return; 
+        }
+        // 2. Ignora se a unidade não foi mapeada ou foi ignorada
         if (!systemUnitName) {
             return;
         }
-        
-        // **ALTERAÇÃO CRÍTICA (Req. Usuário): Removido o filtro que impedia a exibição de S/T.**
-        // Agora, itens S/T da planilha serão processados e, como não encontram match,
-        // cairão na lógica de "Criar Novo Item (S/T)".
-        
+
         let itemsPool = systemItemsByUnit.get(systemUnitName);
         if (!itemsPool) {
-            return; // Não deveria acontecer, mas por segurança
+            return;
         }
         
         // Passa a "piscina" de itens para o findBestMatch
-        const { match, score } = findBestMatch(pastedItem, itemsPool);
+        const { match, score, reason } = findBestMatch(pastedItem, itemsPool);
         
-        // Inicializa o objeto de comparação
-        const comparisonRow = { 
-            pastedItem, 
-            bestMatch: match, 
-            score, 
-            systemUnitName, // Adiciona a unidade do sistema para referência
-            updateDescription: false // Flag para ligação manual (Req 2)
-        };
-        
-        // AGORA, se encontramos uma correspondência, removemos da "piscina"
-        // para que o *próximo item da planilha* não possa usar o *mesmo item S/T*.
-        if (match) {
+        // --- FILTRO DE SAÍDA RÍGIDO (REQUISITO) ---
+        // Apenas itens que deram MATCH RÍGIDO (score 1.0 ou 0.95) ou SOBRANDO (match === null)
+        if (match === null && reason.includes('Tombo Não Encontrado')) {
+             // Caso Sobrando (Vermelho) - Permite passar para ação de criação
+             const comparisonRow = { 
+                pastedItem, 
+                bestMatch: null, 
+                score: 0, 
+                systemUnitName, 
+                updateDescription: false
+            };
+            multiUnitImportData.comparisonData.push(comparisonRow);
+        } else if (match !== null) {
+             // Caso Match Forte (Verde) - Permite passar para ação de atualização
             const matchIndex = itemsPool.findIndex(item => item.id === match.id);
             if (matchIndex > -1) {
                 itemsPool.splice(matchIndex, 1);
             }
+            
+            const comparisonRow = { 
+                pastedItem, 
+                bestMatch: match, 
+                score, 
+                systemUnitName, 
+                updateDescription: false
+            };
+            multiUnitImportData.comparisonData.push(comparisonRow);
         }
-        
-        multiUnitImportData.comparisonData.push(comparisonRow);
+        // Qualquer outro caso (Match fraco, falha no filtro rigoroso) é descartado para "lista limpa".
     });
 
     // 4. Renderiza a tabela de revisão de itens (Etapa 3)
@@ -332,103 +344,55 @@ function processUnitMappingAndLoadItems() {
 }
 
 
-// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombamento (Novo Requisito)
+// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo EXATO OU Match RÍGIDO
 /**
- * Encontra a melhor correspondência para um item da planilha NO INVENTÁRIO NUMERADO.
- * @param {object} pastedItem - O item da planilha.
- * @param {Array<object>} itemsPool - Itens do sistema na unidade selecionada (será modificado se houver match).
+ * Encontra a melhor correspondência no inventário numerado por Tombo Exato ou Match Rígido.
  */
 function findBestMatch(pastedItem, itemsPool) {
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
     const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
     const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
     const pastedEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
-
-    if (!pastedDesc) {
-        return { match: null, score: 0, reason: 'Sem descrição' };
-    }
     
-    // Se o item colado não tem Tombo, não tentamos buscar similaridade, pois o objetivo
-    // principal dessa aba é auditar itens NUMERADOS. Itens S/T (sem match) devem ser criados.
-    if (!pastedTombo || pastedTombo === 's/t') {
-        return { match: null, score: 0, reason: 'Item S/T não busca correspondência' };
-    }
-    
-    let bestMatch = null;
-    let bestScore = 0;
-
-    // --- 1. Priority Match: Exact Tombamento ---
+    // --- 1. Match: Tombo Exato ---
     if (pastedTombo && pastedTombo !== 's/t') {
         const exactTomboMatch = itemsPool.find(item => normalizeTombo(item.Tombamento) === pastedTombo);
         if (exactTomboMatch) {
-            // Remove o item da piscina
-            const matchIndex = itemsPool.findIndex(item => item.id === exactTomboMatch.id);
-            if (matchIndex > -1) itemsPool.splice(matchIndex, 1);
             return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato' };
         }
     }
-
-    // --- 2. Filter Candidates for Similarity Match (Numbered Items) ---
-    // A busca é feita APENAS em itens numerados que não sejam permuta.
+    
+    // Filtro de candidatos: Apenas itens numerados que não são permuta
     const numberedCandidates = itemsPool.filter(item => {
         const tombo = normalizeTombo(item.Tombamento);
         return tombo && tombo !== 's/t' && !item.isPermuta;
     });
 
     if (numberedCandidates.length === 0) {
-        return { match: null, score: 0, reason: 'Nenhum item numerado disponível para comparação' };
+        // Se não houver Tombo Exato e nem candidatos numerados para Match Rigoroso, é Sobrando.
+        return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
     }
 
-    // --- 3. Similarity Scoring and Local/Estado Boosts ---
+    // --- 2. Match: Rígido (Local + Estado + Nome Similar) ---
     for (const systemItem of numberedCandidates) {
         const systemDesc = normalizeStr(systemItem.Descrição);
         const systemLocal = normalizeStr(systemItem.Localização);
         const systemEstado = normalizeEstadoConservacao(systemItem.Estado);
 
-        let score = calculateSimilarity(pastedDesc, systemDesc);
-
-        // Bônus forte para Local Exato
-        if (systemLocal === pastedLocal && systemLocal !== '') {
-            score += 0.25; 
-        } else if (systemLocal !== '' && pastedLocal !== '' && calculateSimilarity(systemLocal, pastedLocal) > 0.8) {
-             score += 0.1; // Bônus menor por local similar
-        }
-        
-        // Bônus para Estado
-        if (systemEstado === pastedEstado) {
-            score += 0.1; 
+        // Requisito: Apenas se Local e Estado forem EXATOS
+        if (systemLocal !== pastedLocal || systemEstado !== pastedEstado) {
+            continue; // Falha no filtro rigoroso
         }
 
-        if (score > bestScore) {
-            bestScore = score;
-            bestMatch = systemItem;
+        // Requisito: Nome QUASE IGUAL (similaridade alta)
+        const nameScore = calculateSimilarity(pastedDesc, systemDesc);
+        if (nameScore > 0.9) { 
+            return { match: systemItem, score: 0.95, reason: 'Match Rigoroso' }; // Match Forte
         }
     }
     
-    // --- 4. Final Threshold and Suggestion Logic (Req 4) ---
-    let finalThreshold = 0.75; // Alta confiança (Descrição + Local/Estado)
-
-    if (bestScore < finalThreshold) {
-        // Se falhou em alta confiança, tenta achar um item no MESMO LOCAL para sugerir (Req 4).
-        const localOnlyMatch = numberedCandidates.find(item => 
-            normalizeStr(item.Localização) === pastedLocal
-        );
-        
-        if (localOnlyMatch) {
-            // Se acharmos um item no mesmo local, forçamos o match com score baixo (50% - Amarelo)
-            // para que o usuário revise a sugestão, mesmo que a descrição não bata.
-            bestMatch = localOnlyMatch;
-            bestScore = 0.55; 
-        } else {
-             return { match: null, score: bestScore, reason: 'Nenhuma correspondência confiável.' };
-        }
-    }
-
-    // Remove o item encontrado da piscina (mesmo se for sugestão de score 0.55)
-    const matchIndex = itemsPool.findIndex(item => item.id === bestMatch.id);
-    if (matchIndex > -1) itemsPool.splice(matchIndex, 1);
-    
-    return { match: bestMatch, score: bestScore, reason: 'Similaridade/Localização' };
+    // --- 3. Falha: Sobrando ---
+    return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
 // FIM DA ALTERAÇÃO
 
@@ -512,11 +476,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             let actionHtml = '';
             let isCheckboxDisabled = false;
             
-            const pastedTomboValido = pastedItem.tombamento && normalizeTombo(pastedItem.tombamento) !== 's/t';
+            const pastedTomboNormalizado = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
 
 
-            if (bestMatch && score >= 0.7) {
-                // Correspondência Forte (Verde)
+            if (bestMatch) {
+                // Correspondência Forte (Verde - Score 1.0 ou 0.95)
                 rowClass = 'bg-green-50';
                 systemHtml = `
                     <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
@@ -531,28 +495,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                         <option value="ignore">Ignorar</option>
                     </select>
                 `;
-            } else if (bestMatch && score >= 0.55) {
-                // Correspondência Média (Amarelo) - Inclui sugestão por Local
-                rowClass = 'bg-yellow-50';
-                systemHtml = `
-                    <p class="font-semibold text-yellow-800">${escapeHtml(bestMatch.Descrição)}</p>
-                    <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
-                    <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
-                    <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
-                    <p class="text-xs font-bold text-amber-700 mt-1">REVISAR: Sugestão por Localização/Similaridade.</p>
-                `;
-                actionHtml = `
-                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
-                        <option value="ignore" selected>Ignorar (Revisar)</option>
-                        <option value="update">Atualizar Campos Marcados</option>
-                    </select>
-                `;
             } else {
-                // Não Encontrado (Vermelho) - Inclui itens sem Tombo
+                // Não Encontrado (Vermelho) - Item Sobrando (Tombo não existe no sistema)
                 rowClass = 'bg-red-50';
                 
-                // Opção para CRIAR NOVO ITEM (Sobrando) - Aplica a itens S/T E a itens com Tombo não encontrado
-                systemHtml = `<p class="font-semibold text-red-700">Item ${pastedTomboValido ? pastedTombo + ' não encontrado' : 'S/T'} no sistema.</p>`;
+                systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
                 actionHtml = `
                     <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
