@@ -747,6 +747,51 @@
         </div>
     </div>
 
+    <!-- INÍCIO DA ALTERAÇÃO: Novo Modal para Ligação Manual -->
+    <div id="manual-link-modal" class="modal fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
+        <div class="modal-overlay absolute inset-0 bg-black/60"></div>
+        <div class="modal-container bg-white w-full max-w-2xl rounded-lg shadow-2xl flex flex-col transform scale-95">
+             <div class="flex items-center justify-between p-4 border-b">
+                <h3 class="text-xl font-semibold">Ligar Item Manualmente</h3>
+                <button type="button" class="p-2 rounded-full hover:bg-slate-200 js-close-modal-manual-link">&times;</button>
+             </div>
+             <div class="p-6 space-y-4 overflow-y-auto" style="max-height: 70vh;">
+                <h4 class="font-bold text-slate-800">Item da Planilha (Não Encontrado):</h4>
+                <div id="manual-link-pasted-item" class="p-3 bg-red-50 border border-red-200 rounded-lg text-sm">
+                    <!-- Detalhes do item colado serão inseridos aqui -->
+                </div>
+                
+                <hr class="my-4">
+
+                <h4 class="font-bold text-slate-800">Ligar com qual item do Sistema?</h4>
+                <p class="text-sm text-slate-600">Selecione o item correto da unidade <strong id="manual-link-unit-name"></strong> que deve corresponder ao item acima.</p>
+                <div>
+                    <label for="manual-link-system-item-select" class="block text-sm font-medium mb-1">Itens do Sistema nesta Unidade:</label>
+                    <select id="manual-link-system-item-select" class="w-full p-2 border rounded-lg bg-white">
+                        <option value="">-- Selecione um item --</option>
+                        <!-- Opções serão preenchidas por JS -->
+                    </select>
+                </div>
+                
+                <div class="mt-4 p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded-r-lg">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="manual-link-update-desc" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                        <span class="ml-3 block text-sm font-medium text-yellow-800">
+                            Substituir a descrição do sistema pela descrição da planilha?
+                        </span>
+                    </label>
+                    <p class="ml-7 text-xs text-yellow-700">Marcando esta caixa, a descrição do item da planilha <strong class="font-bold">sobrescreverá</strong> a descrição do item que você selecionou no sistema.</p>
+                </div>
+
+             </div>
+             <div class="flex justify-end p-4 border-t bg-slate-50 rounded-b-lg space-x-2">
+                <button type="button" class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 js-close-modal-manual-link">Cancelar</button>
+                <button type="button" id="manual-link-confirm-btn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Confirmar Ligação</button>
+             </div>
+        </div>
+    </div>
+    <!-- FIM DA ALTERAÇÃO -->
+
     <!-- Full Page Overlay for saving -->
     <div id="full-page-overlay" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
         <div class="text-center text-white">
