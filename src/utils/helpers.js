@@ -1,4 +1,4 @@
-/**
+/**/**
  * src/utils/helpers.js
  * Funções utilitárias comuns: notificação, normalização de string, debounce e manipulação de moeda.
  */
@@ -116,6 +116,7 @@ export function parseEstadoEOrigem(texto) {
             estadoFinal = estado;
             let resto = textoCru.substring(estado.length).trim();
             
+            // Remove parênteses/colchetes e hífens que separam o estado da origem
             if ((resto.startsWith('(') && resto.endsWith(')')) || (resto.startsWith('[') && resto.endsWith(']'))) {
                 resto = resto.substring(1, resto.length - 1).trim();
             } else if (resto.startsWith('-')) {
@@ -124,23 +125,46 @@ export function parseEstadoEOrigem(texto) {
 
             if (resto) {
                 const restoNormalizado = normalizeStr(resto);
-                if (restoNormalizado.startsWith('doação') || restoNormalizado.startsWith('doacao')) {
+                // Verifica se a origem está claramente marcada como doação
+                if (restoNormalizado.startsWith('doação estado ma') || restoNormalizado.startsWith('doacao estado ma')) {
+                    origemFinal = 'Doação ESTADO MA';
+                } else if (restoNormalizado.startsWith('doação ma') || restoNormalizado.startsWith('doacao ma')) {
+                    origemFinal = 'Doação MA';
+                } else if (restoNormalizado.startsWith('doação') || restoNormalizado.startsWith('doacao')) {
+                    // Pega o resto do texto após "doação"
                     origemFinal = resto.replace(/^(doação|doacao)\s*/i, '').trim();
                 } else {
-                    origemFinal = resto.trim(); // Se não for 'doação', assume que é apenas a origem
+                    origemFinal = resto.trim(); // Se for apenas um texto, assume que é a origem
                 }
             }
-            return { estado: estadoFinal, origem: origemFinal };
+            return { estado: estadoFinal, origem: origemFinal || '' };
         }
     }
     
+    // Se o texto é apenas o estado (ex: "Bom")
     for (const estado of validEstados) {
         if (normalizeStr(textoCru) === normalizeStr(estado)) {
             return { estado: estado, origem: '' };
         }
     }
     
-    return { estado: 'Regular', origem: '' };
+    // Se não for nenhum estado conhecido, assume regular e o texto como origem
+    const normalized = normalizeStr(textoCru);
+    if (normalized.includes('doação estado ma') || normalized.includes('doacao estado ma')) {
+        origemFinal = 'Doação ESTADO MA';
+    } else if (normalized.includes('doação ma') || normalized.includes('doacao ma')) {
+        origemFinal = 'Doação MA';
+    } else if (normalized.includes('doação') || normalized.includes('doacao')) {
+        origemFinal = textoCru.replace(/^(doação|doacao)\s*/i, '').trim();
+    } else if (textoCru.includes('(') || textoCru.includes('[')) {
+        // Tentativa de extrair origem de texto complexo (ex: CRAS VINHAS... BOM (DOAÇÃO ESTADO MA)
+        const match = textoCru.match(/\(([^)]+doação[^)]+)\)|\[([^\]]+doação[^\]]+)\]/i);
+        if (match) {
+            origemFinal = (match[1] || match[2]).trim().replace(/^(doação|doacao)\s*/i, '').trim();
+        }
+    }
+
+    return { estado: 'Regular', origem: origemFinal || '' };
 }
 
 /**
