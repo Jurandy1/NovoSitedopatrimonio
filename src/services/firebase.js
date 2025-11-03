@@ -4,7 +4,12 @@
  */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, collection, query, getDocs, doc, getDoc, setDoc, updateDoc, serverTimestamp, addDoc, orderBy, limit, where, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// EXPORTAÇÕES DO FIRESTORE AGORA ESTÃO AQUI:
+import { 
+    getFirestore, collection, query, getDocs, doc, getDoc, setDoc, updateDoc, 
+    serverTimestamp, addDoc, orderBy, limit, where, deleteDoc, 
+    writeBatch, deleteField // Adicionadas para manipulação em lote e exclusão
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { showNotification } from '../utils/helpers.js';
 
@@ -21,28 +26,37 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+
+// EXPORTAÇÕES CRUCIAIS DO FIRESTORE
 export const serverT = serverTimestamp;
+export { 
+    collection, 
+    query, 
+    getDocs, 
+    doc, 
+    getDoc, 
+    setDoc, 
+    updateDoc, 
+    addDoc, 
+    orderBy, 
+    limit, 
+    where, 
+    deleteDoc,
+    writeBatch,
+    deleteField
+};
+
 
 // --- AUTENTICAÇÃO ---
 
 let authStateChangeCallbacks = [];
 
-// O onAuthStateChanged é o listener oficial que espera o SDK
-// inicializar e verificar o estado de login (do localStorage, etc.)
 onAuthStateChanged(auth, user => {
-    // Quando o Firebase está pronto, ele chama isso (com 'user' ou 'null')
     authStateChangeCallbacks.forEach(cb => cb(user));
 });
 
 export function addAuthListener(callback) {
     authStateChangeCallbacks.push(callback);
-    // REMOVIDO: callback(auth.currentUser);
-    // Esta linha estava causando o problema. Ela chamava o callback
-    // imediatamente (quando auth.currentUser ainda era null), antes do
-    // onAuthStateChanged ter a chance de verificar o localStorage.
-    // Isso resultava em 'isLoggedIn=false' no edit.html, mesmo logado.
-    // Agora, o callback só será chamado UMA VEZ, pelo onAuthStateChanged
-    // acima, quando o estado de autenticação for realmente conhecido.
 }
 
 export async function handleLogin(email, password) {
@@ -51,7 +65,6 @@ export async function handleLogin(email, password) {
         return true;
     } catch (error) {
         console.error("Erro no login:", error.code);
-        // CORREÇÃO: Retorna o objeto de erro para a UI
         return { success: false, code: error.code };
     }
 }
@@ -141,4 +154,3 @@ export async function logAction(action, details) {
         });
     } catch (error) { console.error("Falha ao registrar ação no histórico:", error); }
 }
-
