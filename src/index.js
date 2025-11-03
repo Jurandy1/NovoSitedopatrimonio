@@ -166,7 +166,10 @@ function renderDashboard(items) {
     // Renderiza gráficos (lógica simplificada para caber no módulo)
     const estadoCtx = document.getElementById('dashboardEstadoChart')?.getContext('2d');
     if (estadoCtx) {
-        if (window.dashboardEstadoChart) window.dashboardEstadoChart.destroy();
+        // CORREÇÃO: Verificar se .destroy() é uma função antes de chamar, previne erro.
+        if (window.dashboardEstadoChart && typeof window.dashboardEstadoChart.destroy === 'function') {
+            window.dashboardEstadoChart.destroy();
+        }
         // Adicionando uma cor extra para a categoria 'N/D' (Não Definido)
         window.dashboardEstadoChart = new Chart(estadoCtx, { type: 'doughnut', data: { labels: Object.keys(estadosCount), datasets: [{ data: Object.values(estadosCount), backgroundColor: ['#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#64748b'] }] }, options: { responsive: true, maintainAspectRatio: false } });
     }
@@ -175,7 +178,10 @@ function renderDashboard(items) {
     const sortedUnidades = Object.entries(unidadesCount).sort(([,a],[,b]) => b-a).slice(0, 10);
     const tipoCtx = document.getElementById('dashboardTipoChart')?.getContext('2d');
     if (tipoCtx) {
-        if (window.dashboardTipoChart) window.dashboardTipoChart.destroy();
+        // CORREÇÃO: Verificar se .destroy() é uma função antes de chamar, previne erro.
+        if (window.dashboardTipoChart && typeof window.dashboardTipoChart.destroy === 'function') {
+            window.dashboardTipoChart.destroy();
+        }
         window.dashboardTipoChart = new Chart(tipoCtx, { type: 'bar', data: { labels: sortedUnidades.map(u => u[0]), datasets: [{ label: 'Itens', data: sortedUnidades.map(u => u[1]), backgroundColor: '#3b82f6' }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false } });
     }
 }
@@ -454,5 +460,6 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
 
 
