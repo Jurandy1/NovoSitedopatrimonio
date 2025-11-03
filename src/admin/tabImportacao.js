@@ -853,7 +853,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
                         <th class="p-2 text-left">Estado</th>
                         <th class="p-2 text-left">Origem (Auto)</th>
                     </tr>
-                </thead>
+                </thead
                 <tbody>
         `;
         
@@ -1219,11 +1219,13 @@ export function setupImportacaoListeners(reloadDataCallback) {
         showOverlay(`Processando ${itemsToUpdate.length} atualizações e ${itemsToCreate.length} criações...`);
         const batch = writeBatch(db);
         const newItemsForCache = [];
+        const updatedItemIds = []; // IDs dos itens atualizados para limpar da UI
 
         // Adiciona atualizações ao batch
         itemsToUpdate.forEach(item => {
             const docRef = doc(db, 'patrimonio', item.id);
             batch.update(docRef, item.changes);
+            updatedItemIds.push(item.id);
         });
 
         // Adiciona criações ao batch
@@ -1240,18 +1242,40 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 await idb.patrimonio.bulkAdd(newItemsForCache);
             }
             
-            // Limpa o cache para forçar o reload
+            // Limpa o cache para forçar o reload (apenas metadados)
             await idb.metadata.clear(); 
             
-            showNotification(`${updateCount} ações concluídas! Recarregando...`, 'success');
+            showNotification(`${updateCount} ações concluídas!`, 'success');
             
-            // Reseta a UI da aba
-            DOM_IMPORT.editByDescResults.classList.add('hidden');
-            DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
-            DOM_IMPORT.editByDescData.value = '';
-            multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] }; // Reseta estado local
-
-            reloadDataCallback(true); // Chama o reload global
+            // --- INÍCIO DA CORREÇÃO: Não recarrega, apenas limpa o estado ---
+            
+            // 1. Remove os itens do estado local 'comparisonData'
+            const processedItemIndices = itemsToUpdate.map(item => comparisonData.findIndex(row => row.bestMatch && row.bestMatch.id === item.id))
+                                       .concat(itemsToCreate.map(item => comparisonData.findIndex(row => row.pastedItem.tombamento === normalizeTombo(item.data.Tombamento))));
+            
+            // Remove os itens processados da lista de dados comparativos (de trás para frente)
+            processedItemIndices.sort((a, b) => b - a).filter(index => index > -1).forEach(index => {
+                 multiUnitImportData.comparisonData.splice(index, 1);
+            });
+            
+            // 2. Re-renderiza a lista de preview
+            if(multiUnitImportData.comparisonData.length > 0) {
+                 renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+                 // O total de itens é atualizado dentro da função renderEditByDescPreview
+            } else {
+                 // Reseta a UI da aba
+                 DOM_IMPORT.editByDescResults.classList.add('hidden');
+                 DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
+                 DOM_IMPORT.editByDescData.value = '';
+                 multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] }; // Reseta estado local
+                 showNotification('Todas as ações selecionadas foram salvas. Recarregue a página para começar um novo lote.', 'info');
+            }
+            
+            // 3. Força o recarregamento do estado global para refletir as mudanças nas outras abas
+            reloadDataCallback(); 
+            
+            // --- FIM DA CORREÇÃO ---
+            
         } catch (error) {
             hideOverlay();
             showNotification('Erro ao salvar as atualizações/criações.', 'error');
