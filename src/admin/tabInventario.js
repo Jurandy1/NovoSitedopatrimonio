@@ -3,7 +3,9 @@
  * Lógica da aba "Inventário Editável" (content-edicao).
  */
 
-import { db, serverT, writeBatch, doc, updateDoc, deleteDoc, collection } from '../services/firebase.js';
+// INÍCIO DA ALTERAÇÃO: Adicionado 'addDoc' para criar novos itens
+import { db, serverT, writeBatch, doc, updateDoc, deleteDoc, collection, addDoc } from '../services/firebase.js';
+// FIM DA ALTERAÇÃO
 import { getState, setState } from '../state/globalStore.js';
 import { showNotification, showOverlay, hideOverlay, normalizeStr, debounce, escapeHtml, normalizeTombo } from '../utils/helpers.js';
 import { idb } from '../services/cache.js';
@@ -23,6 +25,11 @@ const DOM_EDIT_INV = {
     deleteSelectedCount: document.getElementById('delete-selected-count'),
     selectAllCheckbox: document.getElementById('select-all-checkbox'),
     deleteConfirmModal: document.getElementById('delete-confirm-modal-edit'),
+    // INÍCIO DA ALTERAÇÃO: Adicionados elementos do DOM
+    unitItemCount: document.getElementById('unit-item-count'),
+    addItemToUnitBtn: document.getElementById('add-item-to-unit-btn'),
+    addItemModal: document.getElementById('add-item-modal'),
+    // FIM DA ALTERAÇÃO
 };
 
 // --- FUNÇÕES DE UTILITY ---
@@ -90,7 +97,9 @@ export function renderEditableTable() {
                     <button class="delete-row-btn p-1 text-red-600 hover:text-red-800" data-id="${item.id}" title="Excluir este item">✖</button>
                 </td>
                 <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tombamento" value="${escapeHtml(item.Tombamento || '')}"></td>
-                <td class="p-2"><button class="sync-giap-btn p-1 text-blue-600 hover:text-blue-800" data-id="${item.id}" title="Sincronizar com GIAP">🔄</button></td>
+                <!-- INÍCIO DA ALTERAÇÃO: Título do botão de sincronia atualizado -->
+                <td class="p-2"><button class="sync-giap-btn p-1 text-blue-600 hover:text-blue-800" data-id="${item.id}" title="Verificar/Sincronizar com Planilha GIAP">🔄</button></td>
+                <!-- FIM DA ALTERAÇÃO -->
                 <td class="p-2"><input type="text" class="w-64 editable-field" data-id="${item.id}" data-field="Descrição" value="${escapeHtml(item.Descrição || '')}"></td>
                 <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tipo" value="${escapeHtml(item.Tipo || '')}"></td>
                 <td class="p-2"><input type="text" class="w-48 editable-field" data-id="${item.id}" data-field="Unidade" value="${escapeHtml(item.Unidade || '')}"></td>
@@ -111,6 +120,17 @@ export function renderEditableTable() {
             </tr>
         `).join('');
     }
+    
+    // INÍCIO DA ALTERAÇÃO: Atualiza contador e visibilidade do botão "Adicionar Item"
+    if (currentEditFilter.unidade) {
+        DOM_EDIT_INV.unitItemCount.textContent = `${filteredItems.length} itens encontrados.`;
+        DOM_EDIT_INV.addItemToUnitBtn.classList.remove('hidden');
+    } else {
+        DOM_EDIT_INV.unitItemCount.textContent = '';
+        DOM_EDIT_INV.addItemToUnitBtn.classList.add('hidden');
+    }
+    // FIM DA ALTERAÇÃO
+
     // Garante que o contador de exclusão seja atualizado.
     updateDeleteButtonState(); 
 }
@@ -316,6 +336,82 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
             openSyncModalCallback(item);
         }
     });
+
+    // INÍCIO DA ALTERAÇÃO: Listeners para o novo modal "Adicionar Item"
+    DOM_EDIT_INV.addItemToUnitBtn.addEventListener('click', () => {
+        if (!currentEditFilter.unidade || !currentEditFilter.tipo) {
+            showNotification('Erro: Unidade ou Tipo não definidos.', 'error');
+            return;
+        }
+        
+        // Preenche o formulário
+        document.getElementById('add-item-unidade').value = currentEditFilter.unidade;
+        document.getElementById('add-item-tipo').value = currentEditFilter.tipo;
+        document.getElementById('add-item-tombamento').value = 'S/T';
+        document.getElementById('add-item-descricao').value = '';
+        document.getElementById('add-item-estado').value = 'Bom';
+        
+        // Abre o modal
+        DOM_EDIT_INV.addItemModal.classList.remove('hidden');
+        document.getElementById('add-item-descricao').focus();
+    });
+
+    const addItemForm = document.getElementById('add-item-form');
+    if (addItemForm) {
+        addItemForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const newItem = {
+                Unidade: document.getElementById('add-item-unidade').value,
+                Tipo: document.getElementById('add-item-tipo').value,
+                Tombamento: document.getElementById('add-item-tombamento').value.trim() || 'S/T',
+                Descrição: document.getElementById('add-item-descricao').value.trim(),
+                Estado: document.getElementById('add-item-estado').value,
+                // Campos padrão para garantir a consistência do schema
+                Localização: '',
+                Fornecedor: '',
+                NF: '',
+                'Origem da Doação': '',
+                Quantidade: 1,
+                Observação: 'Adicionado manualmente via app.',
+                etiquetaPendente: false,
+                isPermuta: false,
+                createdAt: serverT(),
+                updatedAt: serverT()
+            };
+
+            if (!newItem.Descrição) {
+                showNotification('A Descrição é obrigatória.', 'warning');
+                return;
+            }
+
+            showOverlay('Adicionando novo item...');
+            
+            try {
+                // 1. Adiciona ao Firestore
+                const docRef = await addDoc(collection(db, 'patrimonio'), newItem);
+                
+                // 2. Adiciona ao cache local (idb)
+                newItem.id = docRef.id; // Pega o ID gerado pelo Firestore
+                await idb.patrimonio.add(newItem);
+
+                // 3. Fecha o modal e mostra sucesso
+                DOM_EDIT_INV.addItemModal.classList.add('hidden');
+                addItemForm.reset();
+                showNotification('Item adicionado com sucesso! Atualizando...', 'success');
+                
+                // 4. Recarrega todos os dados
+                reloadDataCallback(); 
+
+            } catch (error) {
+                console.error("Erro ao adicionar item:", error);
+                showNotification('Erro ao salvar o item.', 'error');
+            } finally {
+                hideOverlay();
+            }
+        });
+    }
+    // FIM DA ALTERAÇÃO
     
     // Checkbox Mestre (Selecionar Todos)
     DOM_EDIT_INV.selectAllCheckbox.addEventListener('change', (e) => {
