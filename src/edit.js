@@ -8,7 +8,8 @@
 import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
 import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
-import { showNotification, showOverlay, hideOverlay } from './utils/helpers.js';
+import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml } from './utils/helpers.js';
+// CORREÇÃO: Importar getState
 import { subscribe, setState, getState } from './state/globalStore.js';
 
 // --- IMPORTS DOS MÓDULOS DE ADMINISTRAÇÃO (A LÓGICA DAS ABAS) ---
@@ -234,28 +235,37 @@ function renderGiapInventoryTable(giapInventory) {
 // --- LISTENERS E INICIALIZAÇÃO ---
 
 function setupListeners() {
-    // Auth Listener
-    addAuthListener(user => {
-        const isLoggedIn = !!user;
-        setState({ isLoggedIn, user, authReady: true });
 
-        // --- CORREÇÃO (Início) ---
-        // Adiciona uma trava de segurança para getState
-        if (typeof getState !== 'function') {
-            console.error("Auth callback: getState não está definida. Isso pode ser um erro de carregamento.");
-            return;
+    // --- CORREÇÃO (Início) ---
+    // Cria uma função nomeada para o callback de autenticação
+    function handleAuthStateChange(user) {
+        const isLoggedIn = !!user;
+        
+        // Verifica se as funções de estado estão prontas
+        if (typeof setState !== 'function' || typeof getState !== 'function') {
+            console.error("Auth callback: setState ou getState não estão definidas. Problema de carregamento de módulo.");
+            // Não podemos continuar se não pudermos definir o estado.
+            return; 
         }
-        const state = getState();
+
+        setState({ isLoggedIn, user, authReady: true });
+        
+        const state = getState(); // Agora é seguro chamar
         if (!state) {
             console.error("Auth callback: O estado global não está pronto.");
             return;
         }
-        // --- CORREÇÃO (Fim) ---
 
         if (isLoggedIn && !state.initialLoadComplete) {
             loadData(false); // Inicia o carregamento de dados quando logado
         }
-    });
+    }
+    
+    // Auth Listener
+    // Passa a função nomeada para o addAuthListener
+    addAuthListener(handleAuthStateChange);
+    // --- CORREÇÃO (Fim) ---
+
 
     // Forçar Atualização
     DOM.forceRefreshBtn.addEventListener('click', () => loadData(true));
@@ -361,3 +371,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
