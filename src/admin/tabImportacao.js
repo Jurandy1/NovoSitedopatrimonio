@@ -1,4 +1,4 @@
-/**/**
+/**
  * /src/admin/tabImportacao.js
  * Lógica da aba "Importação e Substituição" (content-importacao).
  * * Lógica principal atualizada: Focar em ligar TOMBO da planilha com S/T do sistema 
@@ -518,6 +518,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                             <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
                             <option value="ignore">Ignorar Linha</option>
                         </select>
+                        <!-- BOTÃO DE LIGAÇÃO MANUAL PARA ITENS NÃO ENCONTRADOS -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
                     </div>
                 `;
@@ -569,7 +570,7 @@ function updateEditByDescSummary() {
 }
 // FIM DA ALTERAÇÃO
 
-// INÍCIO DA ALTERAÇÃO: (Req 2) Funções para o Modal de Ligação Manual
+// INÍCIO DA ALTERAÇÃO: (Req 2) Funções para o Modal de Ligação Manual (MODIFICADA PARA INCLUIR ESTADO E LOCAL)
 /**
  * Abre o modal para ligar manualmente um item "Não Encontrado".
  * @param {number} rowIndex - O índice do item em `multiUnitImportData.comparisonData`.
@@ -603,12 +604,14 @@ function openManualLinkModal(rowIndex) {
         .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
     
     let systemItems = allStCandidates;
+    let localMatchesCount = 0;
 
     // Lógica de Filtragem por Local (Req do Usuário)
     if (pastedLocal) {
         const localMatches = allStCandidates.filter(item => 
             normalizeStr(item.Localização) === pastedLocal
         );
+        localMatchesCount = localMatches.length;
         
         // Se houver correspondências de local, mostra APENAS elas.
         // Se não houver, mantém a lista completa de S/T para que o usuário ligue.
@@ -617,15 +620,29 @@ function openManualLinkModal(rowIndex) {
         }
     }
     
-    // 4. Preenche o select com a Localização inclusa
-    DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item do sistema --</option>' +
+    // 4. Preenche o select com a Localização e o Estado (ATUALIZADO)
+    DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item --</option>' +
         systemItems.map(item => `
             <option value="${item.id}">
-                ${escapeHtml(item.Descrição)} (Local: ${escapeHtml(item.Localização || 'N/I')} | Tombo: ${escapeHtml(item.Tombamento || 'S/T')})
+                ${escapeHtml(item.Descrição)} 
+                (Local: ${escapeHtml(item.Localização || 'N/I')} | 
+                Estado: ${escapeHtml(item.Estado || 'N/D')})
             </option>
         `).join('');
 
-    // 5. Reseta o checkbox e abre o modal
+    // 5. Exibe a mensagem de filtro (ADICIONADA NO HTML na resposta anterior, mas a lógica está aqui)
+    const filterMessage = document.getElementById('manual-link-filter-message');
+    if (filterMessage) {
+        if (localMatchesCount > 0) {
+             filterMessage.innerHTML = `<span class="font-semibold text-green-700">${localMatchesCount} itens filtrados</span> com Localização correspondente à planilha.`;
+        } else if (pastedLocal) {
+             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> Listando todos os S/T desta unidade.`;
+        } else {
+             filterMessage.innerHTML = `Listando todos os itens S/T desta unidade.`;
+        }
+    }
+
+    // 6. Reseta o checkbox e abre o modal
     DOM_IMPORT.manualLinkUpdateDesc.checked = false;
     DOM_IMPORT.manualLinkModal.classList.remove('hidden');
 }
