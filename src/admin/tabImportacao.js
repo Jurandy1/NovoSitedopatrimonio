@@ -71,6 +71,8 @@ let multiUnitImportData = {
     fieldUpdates: {}, // Campos a atualizar: { Tombamento: true, ... }
     comparisonData: [] // Dados de comparação item-a-item
 };
+// INÍCIO DA ALTERAÇÃO: Adiciona estado para o modal de ligação manual
+let selPastedItemIndex = null; // Rastreia qual item "Não Encontrado" está sendo ligado
 // FIM DA ALTERAÇÃO
 
 const DOM_IMPORT = {
@@ -120,6 +122,15 @@ const DOM_IMPORT = {
     addGiapNumber: document.getElementById('add-giap-number'),
     addGiapName: document.getElementById('add-giap-name'),
     saveGiapUnitBtn: document.getElementById('save-giap-unit-btn'),
+
+    // INÍCIO DA ALTERAÇÃO: IDs do novo Modal de Ligação Manual
+    manualLinkModal: document.getElementById('manual-link-modal'),
+    manualLinkPastedItem: document.getElementById('manual-link-pasted-item'),
+    manualLinkUnitName: document.getElementById('manual-link-unit-name'),
+    manualLinkSystemItemSelect: document.getElementById('manual-link-system-item-select'),
+    manualLinkUpdateDesc: document.getElementById('manual-link-update-desc'),
+    manualLinkConfirmBtn: document.getElementById('manual-link-confirm-btn'),
+    // FIM DA ALTERAÇÃO
 };
 
 /**
@@ -284,12 +295,25 @@ function processUnitMappingAndLoadItems() {
         }
         
         const { match, score } = findBestMatch(pastedItem, systemItemsForUnit);
-        multiUnitImportData.comparisonData.push({ 
+        
+        // Inicializa o objeto de comparação
+        const comparisonRow = { 
             pastedItem, 
             bestMatch: match, 
             score, 
-            systemUnitName // Adiciona a unidade do sistema para referência
-        });
+            systemUnitName, // Adiciona a unidade do sistema para referência
+            updateDescription: false // Flag para ligação manual (Req 2)
+        };
+        
+        // Remove a correspondência da lista (se encontrada) para evitar duplicação
+        if (match) {
+            const matchIndex = systemItemsForUnit.findIndex(item => item.id === match.id);
+            if (matchIndex > -1) {
+                systemItemsForUnit.splice(matchIndex, 1);
+            }
+        }
+        
+        multiUnitImportData.comparisonData.push(comparisonRow);
     });
 
     // 4. Renderiza a tabela de revisão de itens (Etapa 3)
@@ -305,7 +329,7 @@ function processUnitMappingAndLoadItems() {
 /**
  * Encontra a melhor correspondência para um item da planilha no inventário do sistema.
  * @param {object} pastedItem - O item da planilha.
- * @param {Array<object>} systemItems - Itens do sistema na unidade selecionada (será modificado).
+ * @param {Array<object>} systemItems - Itens do sistema na unidade selecionada (NÃO é mais modificado).
  */
 function findBestMatch(pastedItem, systemItems) {
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
@@ -350,22 +374,11 @@ function findBestMatch(pastedItem, systemItems) {
                 normalizeStr(item.Localização) === pastedLocal
             );
             if (localMatch) {
-                // Remove a correspondência encontrada da lista para evitar correspondências duplicadas
-                const matchIndex = systemItems.findIndex(item => item.id === localMatch.id);
-                if (matchIndex > -1) {
-                    systemItems.splice(matchIndex, 1);
-                }
                 return { match: localMatch, score: 1.0, reason: 'Descrição e Localização' };
             }
         }
     }
     
-    // Remove a correspondência encontrada da lista para evitar correspondências duplicadas
-    const matchIndex = systemItems.findIndex(item => item.id === bestMatch.id);
-    if (matchIndex > -1) {
-        systemItems.splice(matchIndex, 1);
-    }
-
     return { match: bestMatch, score: bestScore, reason: 'Melhor similaridade' };
 }
 
@@ -374,129 +387,238 @@ function findBestMatch(pastedItem, systemItems) {
  * @param {Array<object>} comparisonData - Dados processados da comparação.
  * @param {object} fieldUpdates - Objeto {Tombamento: true, ...}
  */
+// INÍCIO DA ALTERAÇÃO: Função reescrita para (Req 1, 2, 3)
 function renderEditByDescPreview(comparisonData, fieldUpdates) {
     const container = DOM_IMPORT.editByDescPreviewTableContainer;
-    
-    // Cabeçalho da Tabela
-    let html = `
-        <table class="w-full text-sm">
-            <thead class="bg-slate-200 sticky top-0">
-                <tr>
-                    <th class="p-2 text-left w-10"><input type="checkbox" id="edit-by-desc-select-all" class="h-4 w-4"></th>
-                    <th class="p-2 text-left">Sua Planilha (Item Colado)</th>
-                    <th class="p-2 text-left">Sistema (Item Encontrado)</th>
-                    <th class="p-2 text-left w-48">Ação (Req D)</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
+    container.innerHTML = ''; // Limpa o container
 
-    let toUpdateCount = 0;
-    let toIgnoreCount = 0;
-    let notFoundCount = 0;
-
-    comparisonData.forEach((row, index) => {
-        const { pastedItem, bestMatch, score, systemUnitName } = row;
-
-        // --- Dados da Planilha ---
-        const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
-        const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo || 'S/T');
-        const pastedLocal = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/I');
-        const pastedEstadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
-        const pastedEstado = normalizeEstadoConservacao(pastedEstadoInput);
-        const pastedObs = escapeHtml(pastedItem.observacao || pastedItem.obs || '');
-
-        let planilhaHtml = `
-            <p class="font-semibold">${pastedDesc} ${fieldUpdates.Descrição ? '<span class="text-red-500">(Atualizar)</span>' : ''}</p>
-            <p><strong>Tombo:</strong> ${fieldUpdates.Tombamento ? `<span class="text-red-500">${pastedTombo}</span>` : 'Ignorado'}</p>
-            <p><strong>Local:</strong> ${fieldUpdates.Localização ? `<span class="text-red-500">${pastedLocal}</span>` : 'Ignorado'}</p>
-            <p><strong>Estado:</strong> ${fieldUpdates.Estado ? `<span class="text-red-500">${pastedEstado}</span>` : 'Ignorado'}</p>
-            <p><strong>Obs:</strong> ${fieldUpdates.Observação ? `<span class="text-red-500">${pastedObs || '...'}</span>` : 'Ignorado'}</p>
-            <p class="text-xs text-blue-600">Unidade (Planilha): ${escapeHtml(pastedItem.unidade)}</p>
-        `;
-
-        let rowClass = '';
-        let systemHtml = '';
-        let actionHtml = '';
-
-        if (bestMatch && score > 0.7) {
-            // Correspondência Forte (Verde)
-            toUpdateCount++;
-            rowClass = 'bg-green-50';
-            systemHtml = `
-                <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
-                <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
-                <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
-                <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
-                <p class="text-xs text-slate-500">Unidade (Sistema): ${systemUnitName} | ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
-            `;
-            actionHtml = `
-                <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
-                    <option value="update" selected>Atualizar Campos Marcados</option>
-                    <option value="ignore">Ignorar</option>
-                </select>
-            `;
-        } else if (bestMatch && score > 0.6) {
-            // Correspondência Média (Amarelo)
-            toIgnoreCount++;
-            rowClass = 'bg-yellow-50';
-            systemHtml = `
-                <p class="font-semibold text-yellow-800">${escapeHtml(bestMatch.Descrição)}</p>
-                <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
-                <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
-                <p class="text-xs text-slate-500">Unidade (Sistema): ${systemUnitName} | ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
-            `;
-            actionHtml = `
-                <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
-                    <option value="ignore" selected>Ignorar (Revisar)</option>
-                    <option value="update">Atualizar Campos Marcados</option>
-                </select>
-            `;
-        } else {
-            // Não Encontrado (Vermelho)
-            notFoundCount++;
-            rowClass = 'bg-red-50 opacity-70';
-            systemHtml = `<p class="font-semibold text-red-700">Nenhum item similar encontrado na unidade "${systemUnitName}".</p>`;
-            actionHtml = `<select class="edit-by-desc-action w-full p-2 border rounded-lg bg-slate-100" disabled><option value="not_found">Não Encontrado</option></select>`;
+    // (Req 1) Agrupa os dados por unidade do sistema
+    const groupedByUnit = comparisonData.reduce((acc, row) => {
+        const unitName = row.systemUnitName || 'Unidade Inválida';
+        if (!acc[unitName]) {
+            acc[unitName] = [];
         }
+        acc[unitName].push(row);
+        return acc;
+    }, {});
 
+    let html = '';
+
+    // Itera sobre cada unidade agrupada
+    Object.entries(groupedByUnit).forEach(([systemUnitName, items]) => {
+        
         html += `
-            <tr class="border-b ${rowClass}" data-row-index="${index}">
-                <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${actionHtml.includes('disabled') ? 'disabled' : ''}></td>
-                <td class="p-2 align-top">${planilhaHtml}</td>
-                <td class="p-2 align-top">${systemHtml}</td>
-                <td class="p-2 align-top">${actionHtml}</td>
-            </tr>
+            <details open class="unit-group-details mb-4 border rounded-lg shadow-sm bg-white">
+                <summary class="p-3 font-bold text-lg bg-slate-100 cursor-pointer rounded-t-lg flex justify-between items-center hover:bg-slate-200">
+                    <span>Unidade: ${escapeHtml(systemUnitName)}</span>
+                    <span class="text-sm font-normal bg-blue-100 text-blue-700 px-3 py-1 rounded-full">${items.length} itens</span>
+                </summary>
+                <div class="p-2 overflow-x-auto">
+                    <table class="w-full text-sm min-w-[900px]">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="p-2 text-left w-10"><input type="checkbox" class="h-4 w-4 edit-by-desc-unit-select-all" title="Selecionar todos nesta unidade"></th>
+                                <th class="p-2 text-left">Sua Planilha (Item Colado)</th>
+                                <th class="p-2 text-left">Sistema (Item Encontrado)</th>
+                                <th class="p-2 text-left w-48">Ação</th>
+                            </tr>
+                        </thead>
+                        <tbody>
         `;
+
+        // Itera sobre os itens *dentro* de cada unidade
+        items.forEach((row) => {
+            // Encontra o índice global do item para o data-row-index
+            const index = comparisonData.indexOf(row);
+            const { pastedItem, bestMatch, score, systemUnitName } = row;
+
+            // --- Dados da Planilha ---
+            const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
+            const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo || 'S/T');
+            const pastedLocal = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/I');
+            const pastedEstadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
+            const pastedEstado = normalizeEstadoConservacao(pastedEstadoInput);
+            const pastedObs = escapeHtml(pastedItem.observacao || pastedItem.obs || '');
+
+            // (Req 3) Lógica de exibição corrigida (não mostra mais "Ignorado")
+            const descHtml = fieldUpdates.Descrição ? `<span class="text-red-600 font-bold">${pastedDesc} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedDesc} (IGNORAR)</span>`;
+            const tomboHtml = fieldUpdates.Tombamento ? `<span class="text-red-600 font-bold">${pastedTombo} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedTombo} (IGNORAR)</span>`;
+            const localHtml = fieldUpdates.Localização ? `<span class="text-red-600 font-bold">${pastedLocal} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedLocal} (IGNORAR)</span>`;
+            const estadoHtml = fieldUpdates.Estado ? `<span class="text-red-600 font-bold">${pastedEstado} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedEstado} (IGNORAR)</span>`;
+            const obsHtml = fieldUpdates.Observação ? `<span class="text-red-600 font-bold">${pastedObs || '...'} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedObs || '...'} (IGNORAR)</span>`;
+            
+            let planilhaHtml = `
+                <p class="font-semibold">${descHtml}</p>
+                <p><strong>Tombo:</strong> ${tomboHtml}</p>
+                <p><strong>Local:</strong> ${localHtml}</p>
+                <p><strong>Estado:</strong> ${estadoHtml}</p>
+                <p><strong>Obs:</strong> ${obsHtml}</p>
+                <p class="text-xs text-blue-600 mt-1">Planilha: ${escapeHtml(pastedItem.unidade)}</p>
+            `;
+
+            let rowClass = '';
+            let systemHtml = '';
+            let actionHtml = '';
+            let isCheckboxDisabled = false;
+
+            if (bestMatch && score > 0.7) {
+                // Correspondência Forte (Verde)
+                rowClass = 'bg-green-50';
+                systemHtml = `
+                    <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
+                    <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
+                    <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
+                    <p><strong>Estado Atual:</strong> ${escapeHtml(bestMatch.Estado)}</p>
+                    <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+                `;
+                actionHtml = `
+                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
+                        <option value="update" selected>Atualizar Campos Marcados</option>
+                        <option value="ignore">Ignorar</option>
+                    </select>
+                `;
+            } else if (bestMatch && score > 0.6) {
+                // Correspondência Média (Amarelo)
+                rowClass = 'bg-yellow-50';
+                systemHtml = `
+                    <p class="font-semibold text-yellow-800">${escapeHtml(bestMatch.Descrição)}</p>
+                    <p><strong>Tombo Atual:</strong> ${escapeHtml(bestMatch.Tombamento)}</p>
+                    <p><strong>Local Atual:</strong> ${escapeHtml(bestMatch.Localização)}</p>
+                    <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Score: ${(score * 100).toFixed(0)}%</p>
+                `;
+                actionHtml = `
+                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
+                        <option value="ignore" selected>Ignorar (Revisar)</option>
+                        <option value="update">Atualizar Campos Marcados</option>
+                    </select>
+                `;
+            } else {
+                // Não Encontrado (Vermelho)
+                rowClass = 'bg-red-50';
+                systemHtml = `<p class="font-semibold text-red-700">Nenhum item similar encontrado na unidade "${escapeHtml(systemUnitName)}".</p>`;
+                // (Req 2) Botão de Ligar Manualmente
+                actionHtml = `
+                    <p class="text-red-700 font-semibold">Não Encontrado</p>
+                    <button type="button" class="link-manual-btn text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md hover:bg-blue-200 mt-2" data-row-index="${index}">
+                        Ligar Manualmente...
+                    </button>
+                `;
+                isCheckboxDisabled = true;
+            }
+
+            html += `
+                <tr class="border-b ${rowClass}" data-row-index="${index}">
+                    <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${isCheckboxDisabled ? 'disabled' : ''}></td>
+                    <td class="p-2 align-top">${planilhaHtml}</td>
+                    <td class="p-2 align-top">${systemHtml}</td>
+                    <td class="p-2 align-top">${actionHtml}</td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table></div></details>`;
     });
 
-    html += `</tbody></table>`;
     container.innerHTML = html;
 
     // Atualiza o sumário
-    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${notFoundCount} NÃO ENCONTRADOS.`;
-    DOM_IMPORT.confirmEditByDescBtn.disabled = toUpdateCount === 0;
+    updateEditByDescSummary();
 }
+// FIM DA ALTERAÇÃO
 
 /**
  * Atualiza o sumário de ações com base nas seleções atuais.
  */
+// INÍCIO DA ALTERAÇÃO: Lógica de contagem atualizada (Req 2)
 function updateEditByDescSummary() {
-    const selects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
+    const selects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
+    const notFoundButtons = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('button.link-manual-btn');
+    
     let toUpdateCount = 0;
     let toIgnoreCount = 0;
-    let notFoundCount = 0;
+    let notFoundCount = notFoundButtons.length; // Conta os botões "Não Encontrado"
 
     selects.forEach(select => {
         if (select.value === 'update') toUpdateCount++;
         else if (select.value === 'ignore') toIgnoreCount++;
-        else if (select.value === 'not_found') notFoundCount++;
     });
 
     DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${notFoundCount} NÃO ENCONTRADOS.`;
     DOM_IMPORT.confirmEditByDescBtn.disabled = toUpdateCount === 0;
 }
+// FIM DA ALTERAÇÃO
 
+// INÍCIO DA ALTERAÇÃO: (Req 2) Funções para o Modal de Ligação Manual
+/**
+ * Abre o modal para ligar manualmente um item "Não Encontrado".
+ * @param {number} rowIndex - O índice do item em `multiUnitImportData.comparisonData`.
+ */
+function openManualLinkModal(rowIndex) {
+    selPastedItemIndex = rowIndex; // Armazena o índice
+    const { patrimonioFullList } = getState();
+    const { pastedItem, systemUnitName } = multiUnitImportData.comparisonData[rowIndex];
+
+    // 1. Preenche os detalhes do item colado
+    DOM_IMPORT.manualLinkPastedItem.innerHTML = `
+        <p><strong>Descrição:</strong> ${escapeHtml(pastedItem.descricao || pastedItem.item)}</p>
+        <p><strong>Tombo (Planilha):</strong> ${escapeHtml(pastedItem.tombamento || pastedItem.tombo)}</p>
+        <p><strong>Local (Planilha):</strong> ${escapeHtml(pastedItem.local || pastedItem.localizacao)}</p>
+    `;
+
+    // 2. Preenche o nome da unidade
+    DOM_IMPORT.manualLinkUnitName.textContent = systemUnitName;
+
+    // 3. Filtra e preenche o select com itens do sistema
+    const systemItems = patrimonioFullList
+        .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName))
+        .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
+    
+    DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item do sistema --</option>' +
+        systemItems.map(item => `
+            <option value="${item.id}">
+                ${escapeHtml(item.Descrição)} (Tombo: ${escapeHtml(item.Tombamento || 'S/T')})
+            </option>
+        `).join('');
+
+    // 4. Reseta o checkbox e abre o modal
+    DOM_IMPORT.manualLinkUpdateDesc.checked = false;
+    DOM_IMPORT.manualLinkModal.classList.remove('hidden');
+}
+
+/**
+ * Confirma a ligação manual feita no modal.
+ */
+function confirmManualLink() {
+    if (selPastedItemIndex === null) return;
+
+    const systemId = DOM_IMPORT.manualLinkSystemItemSelect.value;
+    const isUpdateDescChecked = DOM_IMPORT.manualLinkUpdateDesc.checked;
+
+    if (!systemId) {
+        return showNotification('Você precisa selecionar um item do sistema para ligar.', 'warning');
+    }
+
+    const { patrimonioFullList } = getState();
+    const systemItem = patrimonioFullList.find(i => i.id === systemId);
+    if (!systemItem) {
+        return showNotification('Erro: Item do sistema não encontrado.', 'error');
+    }
+
+    // Atualiza a linha de comparação em memória
+    const comparisonRow = multiUnitImportData.comparisonData[selPastedItemIndex];
+    comparisonRow.bestMatch = systemItem;
+    comparisonRow.score = 1.0; // 1.0 para indicar override manual
+    comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha
+
+    // Fecha o modal
+    DOM_IMPORT.manualLinkModal.classList.add('hidden');
+    selPastedItemIndex = null;
+
+    // Re-renderiza a lista de preview
+    // A linha que era "Não Encontrado" (vermelha) agora será "Forte" (verde)
+    renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+    showNotification('Item ligado manualmente. A linha foi movida para "Atualizar".', 'success');
+}
 // FIM DA ALTERAÇÃO
 
 // --- LISTENERS ---
@@ -862,9 +984,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
     if (DOM_IMPORT.editByDescSelectAll) {
         DOM_IMPORT.editByDescSelectAll.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
+            // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
             DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:not(:disabled)').forEach(cb => {
                 cb.checked = isChecked;
             });
+            // FIM DA ALTERAÇÃO
         });
     }
 
@@ -873,7 +997,9 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const action = DOM_IMPORT.editByDescBulkAction.value;
             if (!action) return showNotification('Selecione uma ação em massa.', 'warning');
 
+            // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
             const checkedRows = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:checked');
+            // FIM DA ALTERAÇÃO
             if (checkedRows.length === 0) return showNotification('Nenhum item selecionado.', 'warning');
 
             checkedRows.forEach(cb => {
@@ -890,14 +1016,44 @@ export function setupImportacaoListeners(reloadDataCallback) {
 
     // Listener para mudança individual de ação
     DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('change', (e) => {
+        // (Req 1) Listener para "select all" de uma unidade específica
+        if (e.target.classList.contains('edit-by-desc-unit-select-all')) {
+            const isChecked = e.target.checked;
+            const tableBody = e.target.closest('table').querySelector('tbody');
+            tableBody.querySelectorAll('.edit-by-desc-row-checkbox:not(:disabled)').forEach(cb => {
+                cb.checked = isChecked;
+            });
+        }
+        
         if (e.target.classList.contains('edit-by-desc-action')) {
             updateEditByDescSummary();
         }
     });
 
+    // INÍCIO DA ALTERAÇÃO: (Req 2) Listener para o novo botão "Ligar Manualmente"
+    DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('link-manual-btn')) {
+            const rowIndex = parseInt(e.target.closest('tr').dataset.rowIndex, 10);
+            openManualLinkModal(rowIndex);
+        }
+    });
+
+    // (Req 2) Listeners para o novo modal
+    if (DOM_IMPORT.manualLinkConfirmBtn) {
+        DOM_IMPORT.manualLinkConfirmBtn.addEventListener('click', confirmManualLink);
+    }
+    document.body.addEventListener('click', (e) => {
+        if (e.target.matches('.js-close-modal-manual-link') || e.target.matches('.modal-overlay')) {
+            e.target.closest('.modal')?.classList.add('hidden');
+        }
+    });
+    // FIM DA ALTERAÇÃO
+
     // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
+        // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
+        // FIM DA ALTERAÇÃO
         const itemsToUpdate = [];
         const { fieldUpdates, comparisonData } = multiUnitImportData;
 
@@ -905,7 +1061,9 @@ export function setupImportacaoListeners(reloadDataCallback) {
             if (select.value === 'update') {
                 const systemId = select.dataset.systemId;
                 const rowIndex = parseInt(select.closest('tr').dataset.rowIndex, 10);
-                const { pastedItem, bestMatch } = comparisonData[rowIndex];
+                // INÍCIO DA ALTERAÇÃO: (Req 2) Pega 'updateDescription' da linha de dados
+                const { pastedItem, bestMatch, updateDescription } = comparisonData[rowIndex];
+                // FIM DA ALTERAÇÃO
                 
                 if (systemId && pastedItem && bestMatch) {
                     
@@ -922,9 +1080,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     if (fieldUpdates.Estado) {
                         changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
                     }
-                    if (fieldUpdates.Descrição) {
+                    // INÍCIO DA ALTERAÇÃO: (Req 2) Verifica a flag de ligação manual para forçar a atualização da descrição
+                    if (fieldUpdates.Descrição || updateDescription) {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
                     }
+                    // FIM DA ALTERAÇÃO
                     if (fieldUpdates.Observação) {
                         // Substitui a observação antiga
                         changes.Observação = pastedItem.observacao || pastedItem.obs || '';
@@ -934,7 +1094,9 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     if (fieldUpdates.Tombamento && (changes.Tombamento !== bestMatch.Tombamento)) {
                         obs = `[Tombo anterior: ${bestMatch.Tombamento}] ` + obs;
                     }
-                    changes.Observação = `[Atualizado via Importação] ` + (changes.Observação || obs);
+                    // (Req 2) Adiciona nota se foi ligado manualmente
+                    const auditMsg = updateDescription ? '[Ligação Manual com Alt. Descrição]' : '[Atualizado via Importação]';
+                    changes.Observação = `${auditMsg} ` + (changes.Observação || obs);
 
 
                     itemsToUpdate.push({
