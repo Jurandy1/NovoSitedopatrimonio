@@ -6,9 +6,22 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 // EXPORTAÇÕES DO FIRESTORE AGORA ESTÃO AQUI:
 import { 
-    getFirestore, collection, query, getDocs, doc, getDoc, setDoc, updateDoc, 
-    serverTimestamp, addDoc, orderBy, limit, where, deleteDoc, 
-    writeBatch, deleteField // Adicionadas para manipulação em lote e exclusão
+    getFirestore, 
+    collection as firestoreCollection, 
+    query as firestoreQuery, 
+    getDocs as firestoreGetDocs, 
+    doc as firestoreDoc, 
+    getDoc as firestoreGetDoc, 
+    setDoc as firestoreSetDoc, 
+    updateDoc as firestoreUpdateDoc, 
+    serverTimestamp, 
+    addDoc as firestoreAddDoc, 
+    orderBy as firestoreOrderBy, 
+    limit as firestoreLimit, 
+    where as firestoreWhere, 
+    deleteDoc as firestoreDeleteDoc, 
+    writeBatch as firestoreWriteBatch, 
+    deleteField as firestoreDeleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { showNotification } from '../utils/helpers.js';
@@ -29,22 +42,20 @@ export const auth = getAuth(app);
 
 // EXPORTAÇÕES CRUCIAIS DO FIRESTORE
 export const serverT = serverTimestamp;
-export { 
-    collection, 
-    query, 
-    getDocs, 
-    doc, 
-    getDoc, 
-    setDoc, 
-    updateDoc, 
-    addDoc, 
-    orderBy, 
-    limit, 
-    where, 
-    deleteDoc,
-    writeBatch,
-    deleteField
-};
+export const collection = firestoreCollection;
+export const query = firestoreQuery;
+export const getDocs = firestoreGetDocs;
+export const doc = firestoreDoc;
+export const getDoc = firestoreGetDoc;
+export const setDoc = firestoreSetDoc;
+export const updateDoc = firestoreUpdateDoc;
+export const addDoc = firestoreAddDoc;
+export const orderBy = firestoreOrderBy;
+export const limit = firestoreLimit;
+export const where = firestoreWhere;
+export const deleteDoc = firestoreDeleteDoc;
+export const writeBatch = firestoreWriteBatch;
+export const deleteField = firestoreDeleteField;
 
 
 // --- AUTENTICAÇÃO ---
@@ -109,7 +120,7 @@ export async function loadCustomGiapUnits() {
         const docRef = doc(db, 'config', 'customGiapUnits');
         const docSnap = await getDoc(docRef);
         return docSnap.exists() ? docSnap.data().units || [] : [];
-    } catch (error) {
+    } catch (error)
         showNotification("Erro ao carregar unidades GIAP customizadas.", 'error');
         console.error("Error loading custom GIAP units:", error);
         return [];
