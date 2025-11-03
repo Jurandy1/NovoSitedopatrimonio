@@ -384,8 +384,10 @@
 
                         <div>
                             <label for="replace-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui</label>
-                            <p class="text-xs text-slate-500 mb-2">As colunas devem estar na ordem: UNIDADE, ITEM, TOMBO, LOCAL, ESTADO DE CONSERVAÇÃO</p>
-                            <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel e cole aqui..."></textarea>
+                            <!-- INÍCIO DA ALTERAÇÃO: Texto de ajuda corrigido -->
+                            <p class="text-xs text-slate-500 mb-2">Cole os dados do Excel, <strong class="text-red-600">incluindo o cabeçalho</strong>. O sistema espera as colunas: <strong>Descrição</strong> (ou ITEM), <strong>Tombamento</strong> (ou TOMBO), <strong>Local</strong> (ou LOCALIZAÇÃO), e <strong>Estado de Conservação</strong> (ou ESTADO). A coluna 'Unidade' é ignorada (use o seletor acima).</p>
+                            <!-- FIM DA ALTERAÇÃO -->
+                            <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
                         <button id="preview-replace-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Dados</button>
 
