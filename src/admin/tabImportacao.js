@@ -288,7 +288,11 @@ function processUnitMappingAndLoadItems() {
         if (!systemUnitName) {
             return;
         }
-
+        
+        // **ALTERAÇÃO CRÍTICA (Req. Usuário): Removido o filtro que impedia a exibição de S/T.**
+        // Agora, itens S/T da planilha serão processados e, como não encontram match,
+        // cairão na lógica de "Criar Novo Item (S/T)".
+        
         let itemsPool = systemItemsByUnit.get(systemUnitName);
         if (!itemsPool) {
             return; // Não deveria acontecer, mas por segurança
@@ -342,6 +346,12 @@ function findBestMatch(pastedItem, itemsPool) {
 
     if (!pastedDesc) {
         return { match: null, score: 0, reason: 'Sem descrição' };
+    }
+    
+    // Se o item colado não tem Tombo, não tentamos buscar similaridade, pois o objetivo
+    // principal dessa aba é auditar itens NUMERADOS. Itens S/T (sem match) devem ser criados.
+    if (!pastedTombo || pastedTombo === 's/t') {
+        return { match: null, score: 0, reason: 'Item S/T não busca correspondência' };
     }
     
     let bestMatch = null;
@@ -501,6 +511,9 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             let systemHtml = '';
             let actionHtml = '';
             let isCheckboxDisabled = false;
+            
+            const pastedTomboValido = pastedItem.tombamento && normalizeTombo(pastedItem.tombamento) !== 's/t';
+
 
             if (bestMatch && score >= 0.7) {
                 // Correspondência Forte (Verde)
@@ -535,30 +548,20 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     </select>
                 `;
             } else {
-                // Não Encontrado (Vermelho)
-                const pastedTomboValido = pastedItem.tombamento && normalizeTombo(pastedItem.tombamento) !== 's/t';
+                // Não Encontrado (Vermelho) - Inclui itens sem Tombo
                 rowClass = 'bg-red-50';
                 
-                systemHtml = `<p class="font-semibold text-red-700">Nenhum item numerado similar encontrado ou Tombo já alocado na unidade "${escapeHtml(systemUnitName)}".</p>`;
+                // Opção para CRIAR NOVO ITEM (Sobrando) - Aplica a itens S/T E a itens com Tombo não encontrado
+                systemHtml = `<p class="font-semibold text-red-700">Item ${pastedTomboValido ? pastedTombo + ' não encontrado' : 'S/T'} no sistema.</p>`;
                 
-                if (pastedTomboValido) {
-                    // Opção: Criar Novo Item (Req 5)
-                    actionHtml = `
-                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
-                            <option value="ignore" selected>Ignorar (Item não encontrado)</option>
-                            <option value="create_new">Criar Novo Item</option>
-                        </select>
-                    `;
-                } else {
-                    // Sem tombo para criar novo, apenas ignorar/ligar manual
-                    actionHtml = `
-                        <p class="text-red-700 font-semibold">Não Encontrado</p>
-                        <button type="button" class="link-manual-btn text-sm bg-blue-100 text-blue-700 px-3 py-1 rounded-md hover:bg-blue-200 mt-2" data-row-index="${index}">
-                            Ligar Manualmente...
-                        </button>
-                    `;
-                }
-                isCheckboxDisabled = true;
+                actionHtml = `
+                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
+                        <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
+                        <option value="ignore">Ignorar Linha</option>
+                    </select>
+                `;
+
+                isCheckboxDisabled = false; // Permite seleção em massa para criar/ignorar
             }
 
             html += `
@@ -1113,7 +1116,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
     // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
-        const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-action');
+        const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
         // FIM DA ALTERAÇÃO
         const itemsToUpdate = [];
         const itemsToCreate = []; // Novo array para itens a criar (Req 5)
@@ -1132,36 +1135,34 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 // Lógica para criar novo item (Req 5)
                 const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
 
-                if (pastedTombo && pastedTombo !== 's/t') {
-                    updateCount++;
-                    const docRef = doc(collection(db, 'patrimonio'));
-                    
-                    const estadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
-                    const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
-                    const origemDoacao = extractOrigemDoacao(pastedItem);
+                // Permite a criação mesmo sem Tombo (pastedTombo pode ser vazio/S/T)
+                updateCount++;
+                const docRef = doc(collection(db, 'patrimonio'));
+                
+                const estadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
+                const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
+                const origemDoacao = extractOrigemDoacao(pastedItem);
 
-                    const newItem = {
-                        id: docRef.id,
-                        Tombamento: pastedTombo, 
-                        Descrição: pastedItem.descricao || pastedItem.item || 'Item sem descrição',
-                        // Tipo é incerto, usamos N/A ou o tipo de outra unidade similar
-                        Tipo: 'N/A (AUDITORIA)', 
-                        Unidade: systemUnitName, 
-                        Localização: pastedItem.local || pastedItem.localizacao || '',
-                        Fornecedor: '', 
-                        NF: '', 
-                        'Origem da Doação': origemDoacao,
-                        Estado: estadoNormalizado,
-                        Quantidade: 1, 
-                        Observação: `[Criado via Importação] Tombo: ${pastedTombo}.`,
-                        isPermuta: false,
-                        createdAt: serverT(), 
-                        updatedAt: serverT()
-                    };
-                    itemsToCreate.push({ docRef, data: newItem });
-                } else {
-                    console.warn(`Tentativa de criar item sem tombo válido. Ignorando linha ${rowIndex}.`);
-                }
+                const newItem = {
+                    id: docRef.id,
+                    Tombamento: pastedTombo || 'S/T', // Usa S/T se estiver vazio
+                    Descrição: pastedItem.descricao || pastedItem.item || 'Item sem descrição',
+                    // Tipo é incerto, usamos N/A ou o tipo de outra unidade similar
+                    Tipo: 'N/A (AUDITORIA)', 
+                    Unidade: systemUnitName, 
+                    Localização: pastedItem.local || pastedItem.localizacao || '',
+                    Fornecedor: '', 
+                    NF: '', 
+                    'Origem da Doação': origemDoacao,
+                    Estado: estadoNormalizado,
+                    Quantidade: 1, 
+                    Observação: `[Criado via Importação - Sobrando]. ${pastedTombo ? 'Tombo: ' + pastedTombo : 'Item S/T'}.`,
+                    isPermuta: false,
+                    createdAt: serverT(), 
+                    updatedAt: serverT()
+                };
+                itemsToCreate.push({ docRef, data: newItem });
+                
             } else if (action === 'update') {
                 // Lógica de atualização (Item encontrado)
                 if (systemId && pastedItem && bestMatch) {
