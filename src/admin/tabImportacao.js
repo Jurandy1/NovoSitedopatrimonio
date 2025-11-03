@@ -300,6 +300,11 @@ function processUnitMappingAndLoadItems() {
         const { match, score, reason } = findBestMatch(pastedItem, itemsPool);
         
         // --- FILTRO DE SAÍDA RÍGIDO (REQUISITO) ---
+        // Adiciona o filtro para ignorar itens limpos
+        if (reason.includes('Tombo Exato - Limpo')) {
+             return; // Item com Tombo idêntico e considerado sincronizado, ignora a inclusão.
+        }
+
         // Apenas itens que deram MATCH RÍGIDO (score 1.0 ou 0.95) ou SOBRANDO (match === null)
         if (match === null && reason.includes('Tombo Não Encontrado no Sistema')) {
              // Caso Sobrando (Vermelho) - Permite passar para ação de criação
@@ -351,12 +356,13 @@ function findBestMatch(pastedItem, itemsPool) {
     const pastedEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
     
     // --- 1. Busca Preliminar: Item Tombado (Tombo Exato) ---
-    // Se o Tombo da PLANILHA já existe no sistema, atualiza AQUELE item. (PRIORIDADE MÁXIMA)
+    // Se o Tombo da PLANILHA já existe no sistema, NÃO DEVEMOS MOSTRÁ-LO (Tombo Exato - Limpo).
     if (pastedTombo && pastedTombo !== 's/t') {
         const exactTomboMatch = itemsPool.find(item => normalizeTombo(item.Tombamento) === pastedTombo);
         if (exactTomboMatch) {
-            // Se achou pelo Tombo, o match é 1.0. 
-            return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato' };
+            // SOLUÇÃO: Retorna uma flag especial para "Tombo Exato - Limpo"
+            // Isso garante que ele não seja incluído na lista de reconciliação.
+            return { match: null, score: 1.0, reason: 'Tombo Exato - Limpo' };
         }
     }
     
@@ -498,7 +504,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 rowClass = 'bg-green-50';
                 
                 // MENSAGEM: Indica se foi por Tombo Exato ou Match Rígido
-                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rígido (Local/Estado/S/T)';
+                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rigoroso (Local/Estado/S/T)';
                 
                 systemHtml = `
                     <p class="font-semibold text-green-800">${escapeHtml(bestMatch.Descrição)}</p>
