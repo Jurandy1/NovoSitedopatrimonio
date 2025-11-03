@@ -23,6 +23,7 @@ import {
     writeBatch as firestoreWriteBatch, 
     deleteField as firestoreDeleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { showNotification } from '../utils/helpers.js';
 
@@ -57,9 +58,7 @@ export const deleteDoc = firestoreDeleteDoc;
 export const writeBatch = firestoreWriteBatch;
 export const deleteField = firestoreDeleteField;
 
-
 // --- AUTENTICAÇÃO ---
-
 let authStateChangeCallbacks = [];
 
 onAuthStateChanged(auth, user => {
@@ -85,7 +84,6 @@ export function handleLogout() {
 }
 
 // --- FUNÇÕES DE CARREGAMENTO FIREBASE ---
-
 export async function loadFirebaseInventory() {
     const querySnapshot = await getDocs(query(collection(db, 'patrimonio')));
     return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -120,7 +118,7 @@ export async function loadCustomGiapUnits() {
         const docRef = doc(db, 'config', 'customGiapUnits');
         const docSnap = await getDoc(docRef);
         return docSnap.exists() ? docSnap.data().units || [] : [];
-    } catch (error)
+    } catch (error) {
         showNotification("Erro ao carregar unidades GIAP customizadas.", 'error');
         console.error("Error loading custom GIAP units:", error);
         return [];
@@ -163,5 +161,7 @@ export async function logAction(action, details) {
             user: auth.currentUser.email, 
             timestamp: serverTimestamp() 
         });
-    } catch (error) { console.error("Falha ao registrar ação no histórico:", error); }
+    } catch (error) { 
+        console.error("Falha ao registrar ação no histórico:", error); 
+    }
 }
