@@ -550,7 +550,8 @@ function setupListeners() {
             showNotification(`${itemsToSave.size} alterações salvas com sucesso!`, 'success');
             // Recarregar dados para refletir mudanças
             await loadData(true); 
-        } catch (error {
+        // CORREÇÃO DE SINTAXE: de 'catch (error {' para 'catch (error) {'
+        } catch (error) { 
             console.error("Erro ao salvar alterações:", error);
             showNotification('Erro ao salvar alterações.', 'error');
             // Se der erro, restaura os itens que falharam
@@ -607,7 +608,8 @@ function setupListeners() {
             renderSavedMappings(updatedMapping); // Re-renderiza a lista de salvos
 
             showNotification('Mapeamento salvo com sucesso!', 'success');
-        } catch (error {
+        // CORREÇÃO DE SINTAXE: de 'catch (error {' para 'catch (error) {'
+        } catch (error) {
             console.error("Erro ao salvar mapeamento:", error);
             showNotification('Erro ao salvar mapeamento.', 'error');
         } finally {
@@ -645,7 +647,8 @@ function setupListeners() {
             renderSavedMappings(currentMapping); // Re-renderiza a lista
 
             showNotification('Mapeamento excluído!', 'success');
-        } catch (error {
+        // CORREÇÃO DE SINTAXE: de 'catch (error {' para 'catch (error) {'
+        } catch (error) {
             console.error("Erro ao excluir mapeamento:", error);
             showNotification('Erro ao excluir mapeamento.', 'error');
         } finally {
