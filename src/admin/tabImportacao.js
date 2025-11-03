@@ -265,10 +265,38 @@ export function setupImportacaoListeners(reloadDataCallback) {
         DOM_IMPORT.replaceResults.classList.remove('hidden');
         document.getElementById('replace-preview-count').textContent = parsed.length;
         
-        // INÍCIO DA ALTERAÇÃO: Atualiza a pré-visualização para usar os novos nomes de campo
-        DOM_IMPORT.replacePreviewList.innerHTML = parsed.map(item => `
-            <div class="text-sm p-1 border-b">${escapeHtml(item.descrição || item.descricao || item.item || 'S/D')} (T: ${escapeHtml(item.tombamento || item.tombo || 'S/T')})</div>
-        `).join('');
+        // INÍCIO DA ALTERAÇÃO: Atualiza a pré-visualização para usar uma TABELA para melhor alinhamento
+        let previewHtml = `
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-slate-100">
+                        <th class="p-2 text-left">Descrição</th>
+                        <th class="p-2 text-left">Tombamento</th>
+                        <th class="p-2 text-left">Local</th>
+                        <th class="p-2 text-left">Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        previewHtml += parsed.map(item => {
+            const desc = escapeHtml(item.descrição || item.descricao || item.item || 'S/D');
+            const tombo = escapeHtml(item.tombamento || item.tombo || 'S/T');
+            const local = escapeHtml(item.local || item.localização || 'N/I');
+            const estado = escapeHtml(item['estado de conservação'] || item.estado || 'Regular');
+            
+            return `
+                <tr class="border-b">
+                    <td class="p-2">${desc}</td>
+                    <td class="p-2 font-mono">${tombo}</td>
+                    <td class="p-2">${local}</td>
+                    <td class="p-2 font-semibold text-blue-600">${estado}</td>
+                </tr>
+            `;
+        }).join('');
+
+        previewHtml += `</tbody></table>`;
+        DOM_IMPORT.replacePreviewList.innerHTML = previewHtml;
         // FIM DA ALTERAÇÃO
         
         DOM_IMPORT.confirmReplaceBtn.disabled = !DOM_IMPORT.replaceConfirmCheckbox.checked;
@@ -396,3 +424,4 @@ export function setupImportacaoListeners(reloadDataCallback) {
         reloadDataCallback();
     });
 }
+
