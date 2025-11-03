@@ -5,9 +5,9 @@
  */
 
 // --- IMPORTS DE SERVIÇOS E ESTADO ---
-import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT } from './services/firebase.js';
+// CORREÇÃO: Adicionada a variável 'db' e removidos comandos duplicados
+import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
-import { idb, isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js';
 // INÍCIO DA ALTERAÇÃO: Importar normalizeTombo
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from './utils/helpers.js';
 // FIM DA ALTERAÇÃO
@@ -32,10 +32,7 @@ const DOM = {
     navButtons: document.querySelectorAll('#edit-nav .nav-btn'),
     contentPanes: document.querySelectorAll('main > div[id^="content-"]'),
     
-    // --- IMPORTS DE SERVIÇOS E ESTADO ---
-    import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
-     import { loadGiapInventory } from './services/giapService.js';
- import { loadGiapInventory } from './services/giapService.js';
+    // CORREÇÃO: Removidos imports duplicados que estavam dentro do objeto DOM e causavam o SyntaxError.
     subTabNavConciliar: document.querySelectorAll('#content-conciliar .sub-nav-btn'),
     subTabNavImportacao: document.querySelectorAll('#content-importacao .sub-nav-btn'),
 
@@ -393,7 +390,7 @@ function renderUpdateAllList(itemsToReview) {
     // Combine all HTML
     DOM.updateAllList.innerHTML = `
         ${bulkActionsHtml}
-        ${nameChangeHtml ? `<div classs="mt-4"><h4 class="text-lg font-semibold my-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
+        ${nameChangeHtml ? `<div class="mt-4"><h4 class="text-lg font-semibold my-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
         ${notFoundHtml ? `<div class="mt-6"><h4 class="text-lg font-semibold my-2">Itens Não Encontrados</h4><div class="space-y-3">${notFoundHtml}</div></div>` : ''}
     `;
 }
