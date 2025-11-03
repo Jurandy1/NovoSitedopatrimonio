@@ -528,6 +528,8 @@ async function savePendingLinks(context = 'unidade', reloadDataCallback) {
         // Dispara o reload completo no orquestrador
         reloadDataCallback(); 
 
+        // ***** CORREÇÃO: O hideOverlay() estava faltando aqui *****
+        hideOverlay(); 
         showNotification(`${numLinks} vínculos salvos com sucesso!`, 'success');
 
         return true;
@@ -651,7 +653,7 @@ export function setupConciliarListeners(reloadDataCallback) {
         }
     });
 
-    // Importar itens do GIAP (Unidade)
+            // Importar itens do GIAP (Unidade)
     DOM_CONC.importGiapBtn.addEventListener('click', async () => {
         if (giapItemsForImport.length === 0) return showNotification('Nenhum item GIAP selecionado para importar.', 'warning');
         
@@ -692,7 +694,7 @@ export function setupConciliarListeners(reloadDataCallback) {
             // Força o reload completo no orquestrador
             reloadDataCallback(); 
             renderConciliationLists('unidade');
-            hideOverlay();
+            // hideOverlay(); // Movido para dentro do savePendingLinks
         } catch (e) {
             hideOverlay();
             showNotification('Erro ao importar itens.', 'error'); 
@@ -830,3 +832,4 @@ export function setupConciliarListeners(reloadDataCallback) {
         }
     });
 }
+
