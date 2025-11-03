@@ -247,22 +247,29 @@ export function setupImportacaoListeners(reloadDataCallback) {
     });
 
     // 4. Lógica de Substituir Inventário (Preview e Confirmação)
-    // NOTE: A lógica de parsing da planilha/colunas (PapaParse) deve ser implementada aqui.
     DOM_IMPORT.previewReplaceBtn.addEventListener('click', () => {
         const data = DOM_IMPORT.replaceData.value;
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
         
-        // Simulação de PapaParse (o PapaParse é global, mas a lógica de parse é aqui)
-        const parsed = Papa.parse(data, { header: true, skipEmptyLines: true, delimiter: '\t', transformHeader: h => h.trim() }).data;
+        // INÍCIO DA ALTERAÇÃO: transformHeader agora usa toLowerCase()
+        const parsed = Papa.parse(data, { 
+            header: true, 
+            skipEmptyLines: true, 
+            delimiter: '\t', 
+            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+        }).data;
+        // FIM DA ALTERAÇÃO
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado.', 'error');
         
-        // Renderiza pré-visualização (lógica omitida para brevidade, mas o HTML já está no edit.html)
         DOM_IMPORT.replaceResults.classList.remove('hidden');
         document.getElementById('replace-preview-count').textContent = parsed.length;
+        
+        // INÍCIO DA ALTERAÇÃO: Atualiza a pré-visualização para usar os novos nomes de campo
         DOM_IMPORT.replacePreviewList.innerHTML = parsed.map(item => `
-            <div class="text-sm p-1 border-b">${escapeHtml(item.ITEM || item.DESCRIÇÃO)} (T: ${escapeHtml(item.TOMBO || 'S/T')})</div>
+            <div class="text-sm p-1 border-b">${escapeHtml(item.descrição || item.descricao || item.item || 'S/D')} (T: ${escapeHtml(item.tombamento || item.tombo || 'S/T')})</div>
         `).join('');
+        // FIM DA ALTERAÇÃO
         
         DOM_IMPORT.confirmReplaceBtn.disabled = !DOM_IMPORT.replaceConfirmCheckbox.checked;
     });
@@ -282,7 +289,14 @@ export function setupImportacaoListeners(reloadDataCallback) {
         showOverlay(`Substituindo inventário de ${unidade}...`);
         
         // 1. Parse dos Novos Dados
-        const parsed = Papa.parse(data, { header: true, skipEmptyLines: true, delimiter: '\t', transformHeader: h => h.trim() }).data;
+        // INÍCIO DA ALTERAÇÃO: transformHeader agora usa toLowerCase()
+        const parsed = Papa.parse(data, { 
+            header: true, 
+            skipEmptyLines: true, 
+            delimiter: '\t', 
+            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+        }).data;
+        // FIM DA ALTERAÇÃO
         
         // 2. Apagar itens existentes
         try {
@@ -306,23 +320,36 @@ export function setupImportacaoListeners(reloadDataCallback) {
             
             parsed.forEach(item => {
                 const docRef = doc(collection(db, 'patrimonio'));
+                
+                // INÍCIO DA ALTERAÇÃO: Lógica de criação de newItem atualizada
                 const newItem = {
                     id: docRef.id,
-                    Tombamento: item.TOMBO || item.TOMBAMENTO || 'S/T', Descrição: item.ITEM || item.DESCRIÇÃO || 'Item sem descrição',
-                    Tipo: tipo, Unidade: unidade, Localização: item.LOCAL || item.LOCALIZAÇÃO || '',
+                    Tombamento: item.tombamento || item.tombo || 'S/T', 
+                    Descrição: item.descrição || item.descricao || item.item || 'Item sem descrição',
+                    Tipo: tipo, 
+                    Unidade: unidade, 
+                    Localização: item.local || item.localização || '',
                     Fornecedor: '', NF: '', 'Origem da Doação': '',
-                    Estado: item['ESTADO DE CONSERVAÇÃO'] || item.ESTADO || 'Regular', Quantidade: 1, Observação: 'Substituição em massa.',
+                    Estado: item['estado de conservação'] || item.estado || 'Regular', 
+                    Quantidade: 1, 
+                    Observação: 'Substituição em massa.',
                     isPermuta: false,
                     createdAt: serverT(), updatedAt: serverT()
                 };
+                // FIM DA ALTERAÇÃO
+
                 createBatch.set(docRef, newItem);
                 newItemsForCache.push(newItem);
             });
 
             await createBatch.commit();
+            // Atualiza o cache local (idb)
+            const oldItems = await idb.patrimonio.where('Unidade').equals(unidade).toArray();
+            await idb.patrimonio.bulkDelete(oldItems.map(i => i.id));
             await idb.patrimonio.bulkAdd(newItemsForCache);
+            
             showNotification(`Novo inventário com ${parsed.length} itens criado.`, 'success');
-            reloadDataCallback();
+            reloadDataCallback(true); // Força recarregamento completo
         } catch (e) {
             hideOverlay();
             showNotification('Erro ao criar novo inventário.', 'error');
@@ -338,7 +365,12 @@ export function setupImportacaoListeners(reloadDataCallback) {
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
         
         // Simulação de parse (PapaParse)
-        const parsed = Papa.parse(data, { header: true, skipEmptyLines: true, delimiter: '\t', transformHeader: h => h.trim() }).data;
+        const parsed = Papa.parse(data, { 
+            header: true, 
+            skipEmptyLines: true, 
+            delimiter: '\t', 
+            transformHeader: h => h.trim().toLowerCase() // Garante cabeçalhos em minúsculo
+        }).data;
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
 
