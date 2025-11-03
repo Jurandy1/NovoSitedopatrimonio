@@ -210,7 +210,7 @@ function renderUnitMatchingUI(unitsToMatch) {
                     <select class="unit-mapping-select w-full p-2 border rounded-lg bg-white">
                         ${systemUnitOptions}
                     </select>
-                </td>
+                </td
             </tr>
         `;
     });
@@ -274,18 +274,14 @@ function processUnitMappingAndLoadItems() {
 
         // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO DO USUÁRIO) ---
         const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
-        const isPastedDoacao = normalizeStr(extractOrigemDoacao(pastedItem)).includes('doacao');
+        // const isPastedDoacao = normalizeStr(extractOrigemDoacao(pastedItem)).includes('doacao'); // Removido para simplificar
+        
+        // NOVO FILTRO: Apenas permite tombos numéricos na planilha
+        // Se não for 'S/T' e não for Permuta, e não puder ser convertido para um número (ou seja, não é numérico)
+        if (pastedTombo === 's/t' || pastedTombo === '' || pastedTombo.toLowerCase().includes('permuta') || isNaN(pastedTombo)) {
+            return; 
+        }
 
-        // REGRA 1 & 2: Descarta se for S/T OU VAZIO E NÃO for Doação.
-        if ((pastedTombo === 's/t' || pastedTombo === '') && !isPastedDoacao) {
-             return; 
-        }
-        
-        // REGRA de Permuta: Ignora se for Permuta.
-        if (pastedTombo.toLowerCase().includes('permuta')) {
-             return; 
-        }
-        
         // 2. Ignora se a unidade não foi mapeada ou foi ignorada
         if (!systemUnitName) {
             return;
@@ -373,6 +369,7 @@ function findBestMatch(pastedItem, itemsPool) {
         return (tombo === 's/t' || tombo === '') && !item.isPermuta;
     });
 
+    // Se o Tombo da planilha é numérico, mas não achou um match exato, e não há S/T disponíveis
     if (pastedTombo && pastedTombo !== 's/t') {
         // Se a planilha TEM Tombo, mas não achou por Tombo Exato, e não há itens S/T para ligar
         // Ou seja, o Tombo da planilha não bate, e não há S/T para ligar
