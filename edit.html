@@ -4,11 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Auditoria e Edição - Sistema de Patrimônio</title>
+    <!-- Adiciona a tag de script do Tailwind (Necessária para usar o CDN e suprimir o aviso) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.2/papaparse.min.js"></script>
-    <!-- Dexie.js for IndexedDB Cache -->
-    <!-- REMOVIDO: A importação do Dexie.js é feita via módulo em src/services/cache.js para evitar conflitos de escopo. -->
-    <!-- <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script> -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
