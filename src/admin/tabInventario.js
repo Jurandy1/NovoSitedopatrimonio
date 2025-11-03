@@ -224,7 +224,7 @@ async function deleteItems(ids) {
 // --- LISTENERS ---
 
 export function setupInventarioListeners(reloadDataCallback, openSyncModalCallback) {
-    const { patrimonioFullList } = getState();
+    // *** CORREÇÃO: patrimonioFullList removido deste escopo ***
 
     // Listener para filtros
     const debouncedRender = debounce(() => {
@@ -233,6 +233,8 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
     }, 300);
 
     DOM_EDIT_INV.filtroTipo.addEventListener('change', () => {
+        // *** CORREÇÃO: patrimonioFullList é obtido de getState() AQUI DENTRO ***
+        const { patrimonioFullList } = getState();
         const selectedTipo = DOM_EDIT_INV.filtroTipo.value;
         currentEditFilter.tipo = selectedTipo;
         
@@ -287,6 +289,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
 
     // Listener para ações da tabela (botões e checkboxes)
     DOM_EDIT_INV.editTableBody.addEventListener('click', async (e) => {
+        const { patrimonioFullList } = getState(); // Pega a lista para ações
         const target = e.target;
         const id = target.dataset.id;
         
@@ -426,6 +429,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
     
     // Botão de Excluir Selecionados
     DOM_EDIT_INV.deleteSelectedBtn.addEventListener('click', () => {
+        const { patrimonioFullList } = getState(); // Pega a lista para esta ação
         const checked = DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox:checked');
         if (checked.length === 0) return;
         
