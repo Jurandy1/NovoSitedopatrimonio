@@ -18,6 +18,27 @@ import { doc, setDoc, updateDoc, serverTimestamp, writeBatch, addDoc, query, ord
 // --- DOM ELEMENTS (Simplificado) ---
 const DOM = {
     loadingScreen: document.getElementById('loading-or-error-screen'),
+    authGate: document.getElementById('auth-gate'),
+    feedbackStatus: document.getElementById('feedback-status'),
+    forceRefreshBtn: document.getElementById('force-refresh-btn'),
+    logoutBtn: document.getElementById('logout-btn'),
+    navButtons: document.querySelectorAll('#edit-nav .nav-btn'),
+    contentPanes: document.querySelectorAll('main > div[id^="content-"]'),
+    editTableBody: document.getElementById('edit-table-body'),
+    saveAllChangesBtn: document.getElementById('save-all-changes-btn'),
+    syncConfirmModal: document.getElementById('sync-confirm-modal'),
+    deleteConfirmModal: document.getElementById('delete-confirm-modal-edit'),
+    descChoiceModal: document.getElementById('desc-choice-modal'),
+    fullPageOverlay: document.getElementById('full-page-overlay'),
+    overlayMessage: document.getElementById('overlay-message'),
+    
+    // Aba: Ligar Unidades
+    mapFilterTipo: document.getElementById('map-filter-tipo'),
+    mapSystemUnitSelect: document.getElementById('map-system-unit-select'),
+    mapGiapFilter: document.getElementById('map-giap-filter'),
+    mapGiapUnitMultiselect: document.getElementById('map-giap-unit-multiselect'),
+    saveMappingBtn: document.getElementById('save-mapping-btn'),
+    savedMappingsContainer: document.getElementById('saved-mappings-container'),
 
     // Aba: Conciliar Itens
     conciliarFilterTipo: document.getElementById('filter-tipo'),
@@ -35,10 +56,99 @@ const DOM = {
 };
 
 // --- ESTADO LOCAL/TRANSITÓRIO ---
-// ... existing code ...
-// ... existing code ...
+let dirtyItems = new Map();
+let currentDeleteItemIds = []; 
+let selSys = null, selGiap = null; // Seleções para conciliação
+let linksToCreate = [];
+let currentEditFilter = { tipo: '', unidade: '', estado: '', descricao: '' };
+
+// --- INICIALIZAÇÃO E CARREGAMENTO DE DADOS ---
+
+async function loadData(forceRefresh) {
+    DOM.loadingScreen.classList.remove('hidden');
+    setState({ statusMessage: 'Carregando dados...' });
+    
+    let [fullInventory, giapInventory] = [[], []];
+    
+    const cacheStale = await isCacheStale();
+
+    if (!forceRefresh && !cacheStale) {
+        setState({ statusMessage: 'Carregando cache local...' });
+        [fullInventory, giapInventory] = await loadFromCache();
+    } else {
+        setState({ statusMessage: 'Buscando dados atualizados do servidor...' });
+        showOverlay('Buscando dados no servidor...');
+        try {
+            const [freshPatrimonio, freshGiapData] = await Promise.all([
+                loadFirebaseInventory(),
+                loadGiapInventory()
+            ]);
+            fullInventory = freshPatrimonio;
+            giapInventory = freshGiapData;
+            await updateLocalCache(fullInventory, giapInventory);
+        } catch (error) {
+            showNotification('Erro ao carregar dados do servidor. Usando cache.', 'error');
+            [fullInventory, giapInventory] = await loadFromCache();
+        } finally {
+            hideOverlay();
+        }
+    }
+    
+    // Carrega dados de configuração e padrões de IA
+    const [unitMapping, reconciledUnits, customGiapUnits, padroesConciliacao] = await Promise.all([
+        loadUnitMappingFromFirestore(),
+        loadReconciledUnits(),
+        loadCustomGiapUnits(),
+        loadConciliationPatterns()
+    ]);
+
+    // Cria os mapas para acesso rápido
+    const giapMapAllItems = new Map(giapInventory.map(item => [normalizeTombo(item['TOMBAMENTO']), item]));
+    const giapMap = new Map(giapInventory
+        .filter(item => normalizeStr(item.Status).includes(normalizeStr('Disponível')))
+        .map(item => [normalizeTombo(item['TOMBAMENTO']), item])
+    );
+    const normalizedSystemUnits = new Map();
+    fullInventory.forEach(item => {
+        if (item.Unidade) {
+            const normalized = normalizeStr(item.Unidade);
+            if (!normalizedSystemUnits.has(normalized)) {
+                normalizedSystemUnits.set(normalized, item.Unidade.trim());
+            }
+        }
+    });
+
+    setState({ 
+        patrimonioFullList: fullInventory, 
+        giapInventory, 
+        giapMap,
+        giapMapAllItems,
+        unitMapping,
+        reconciledUnits,
+        customGiapUnits,
+        padroesConciliacao,
+        normalizedSystemUnits,
+        initialLoadComplete: true,
+        statusMessage: `Pronto. ${fullInventory.length} itens carregados.`
+    });
+}
+
+// --- FUNÇÕES DE RENDERIZAÇÃO E ATUALIZAÇÃO DA UI ---
+
 function updateUIFromState(state) {
-// ... existing code ...
+    const user = state.user;
+    DOM.feedbackStatus.textContent = state.statusMessage;
+
+    if (state.authReady) {
+        DOM.authGate.classList.toggle('hidden', !state.isLoggedIn);
+        DOM.loadingScreen.classList.toggle('hidden', state.isLoggedIn);
+        document.getElementById('user-email-edit').textContent = user ? user.email : 'Não logado';
+
+        if (!state.isLoggedIn) {
+            DOM.loadingScreen.innerHTML = `<div class="text-center"><h2 class="text-2xl font-bold text-red-600">Acesso Negado</h2><p>Você precisa estar logado para acessar esta página. Volte para a página principal para fazer o login.</p></div>`;
+            return;
+        }
+
         if (state.initialLoadComplete) {
             // CORREÇÃO: Chama as funções de população que agora têm código
             populateEditableInventoryTab();
@@ -46,13 +156,111 @@ function updateUIFromState(state) {
             populateReconciliationTab(); // AGORA IMPLEMENTADO
             populatePendingTransfersTab(); // Ainda está vazia
             // ... outras abas
-// ... existing code ...
-// ... existing code ...
+        }
+    }
+}
+
+// --- FUNÇÕES DAS ABAS DE ADMINISTRAÇÃO ---
+
+/**
+ * Popula a aba "Inventário Editável"
+ */
+function populateEditableInventoryTab() {
+    const { patrimonioFullList } = getState();
+    const filtroTipo = document.getElementById('edit-filter-tipo');
+    const filtroEstado = document.getElementById('edit-filter-estado');
+
+    // Popula filtros
+    const tipos = [...new Set(patrimonioFullList.map(item => item.Tipo).filter(Boolean))].sort();
+    const estados = ['Novo', 'Bom', 'Regular', 'Avariado', 'N/D'];
+    
+    filtroTipo.innerHTML = '<option value="">Todos os Tipos</option>' + tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    filtroEstado.innerHTML = '<option value="">Todos os Estados</option>' + estados.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
+
+    // Popula filtro de unidade baseado no tipo
+    filtroTipo.addEventListener('change', () => {
+        const selectedTipo = filtroTipo.value;
+        currentEditFilter.tipo = selectedTipo;
+        const filtroUnidade = document.getElementById('edit-filter-unidade');
+        
+        const unidades = selectedTipo
+            ? [...new Set(patrimonioFullList.filter(i => i.Tipo === selectedTipo).map(i => i.Unidade).filter(Boolean))].sort()
+            : [];
+            
+        filtroUnidade.innerHTML = '<option value="">Todas as Unidades</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+        filtroUnidade.disabled = !selectedTipo;
+        currentEditFilter.unidade = ''; // Reseta unidade
+        renderEditableTable(); // Re-renderiza
+    });
+    
+    // Listeners de filtro
+    document.getElementById('edit-filter-unidade').addEventListener('change', (e) => { currentEditFilter.unidade = e.target.value; renderEditableTable(); });
+    filtroEstado.addEventListener('change', (e) => { currentEditFilter.estado = e.target.value; renderEditableTable(); });
+    document.getElementById('edit-filter-descricao').addEventListener('input', debounce((e) => { currentEditFilter.descricao = normalizeStr(e.target.value); renderEditableTable(); }, 300));
+
+    // Renderiza tabela inicial (vazia)
+    renderEditableTable();
+}
+
+/**
+ * Renderiza a tabela do inventário editável com base nos filtros
+ */
 function renderEditableTable() {
     const tableBody = DOM.editTableBody;
+    const { patrimonioFullList } = getState();
+    
+    const getNormalizedEstado = (state) => {
+        const normalized = normalizeStr(state);
+        if (['avariado', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
+        if (normalized.startsWith('novo')) return 'Novo';
+        if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
+        if (normalized.startsWith('regular')) return 'Regular';
+        return 'N/D';
+    };
+
+    const filteredItems = patrimonioFullList.filter(item => {
+        const { tipo, unidade, estado, descricao } = currentEditFilter;
+        if (tipo && item.Tipo !== tipo) return false;
+        if (unidade && item.Unidade !== unidade) return false;
+        if (estado && getNormalizedEstado(item.Estado) !== estado) return false;
+        if (descricao && !normalizeStr(item.Descrição).includes(descricao)) return false;
+        return true;
+    });
+
     // Limita a 200 itens para performance. Filtros mais específicos são necessários.
-// ... existing code ...
-// ... existing code ...
+    const itemsToDisplay = filteredItems.slice(0, 200);
+
+    if (itemsToDisplay.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="14" class="text-center p-10 text-slate-500">Nenhum item encontrado. Use os filtros para refinar sua busca.</td></tr>`;
+    } else {
+        tableBody.innerHTML = itemsToDisplay.map(item => `
+            <tr id="row-${item.id}" class="${dirtyItems.has(item.id) ? 'is-dirty' : ''}">
+                <td class="p-2"><input type="checkbox" class="row-checkbox" data-id="${item.id}"></td>
+                <td class="p-2">
+                    <button class="save-row-btn p-1 text-green-600" data-id="${item.id}" title="Salvar este item">&#10003;</button>
+                    <button class="delete-row-btn p-1 text-red-600" data-id="${item.id}" title="Excluir este item">&times;</button>
+                </td>
+                <td class="p-2"><input type="text" class="w-24" data-id="${item.id}" data-field="Tombamento" value="${escapeHtml(item.Tombamento || '')}"></td>
+                <td class="p-2"><button class="sync-giap-btn p-1" data-id="${item.id}" title="Sincronizar com GIAP">🔄</button></td>
+                <td class="p-2"><input type="text" class="w-64" data-id="${item.id}" data-field="Descrição" value="${escapeHtml(item.Descrição || '')}"></td>
+                <td class="p-2"><input type="text" class="w-24" data-id="${item.id}" data-field="Tipo" value="${escapeHtml(item.Tipo || '')}"></td>
+                <td class="p-2"><input type="text" class="w-48" data-id="${item.id}" data-field="Unidade" value="${escapeHtml(item.Unidade || '')}"></td>
+                <td class="p-2"><input type="text" class="w-32" data-id="${item.id}" data-field="Localização" value="${escapeHtml(item.Localização || '')}"></td>
+                <td class="p-2"><input type="text" class="w-32" data-id="${item.id}" data-field="Fornecedor" value="${escapeHtml(item.Fornecedor || '')}"></td>
+                <td class="p-2"><input type="text" class="w-20" data-id="${item.id}" data-field="NF" value="${escapeHtml(item.NF || '')}"></td>
+                <td class="p-2"><input type="text" class="w-32" data-id="${item.id}" data-field="Origem da Doação" value="${escapeHtml(item['Origem da Doação'] || '')}"></td>
+                <td class="p-2">
+                    <select class="w-28" data-id="${item.id}" data-field="Estado">
+                        <option value="Novo" ${item.Estado === 'Novo' ? 'selected' : ''}>Novo</option>
+                        <option value="Bom" ${item.Estado === 'Bom' ? 'selected' : ''}>Bom</option>
+                        <option value="Regular" ${item.Estado === 'Regular' ? 'selected' : ''}>Regular</option>
+                        <option value="Avariado" ${item.Estado === 'Avariado' ? 'selected' : ''}>Avariado</option>
+                    </select>
+                </td>
+                <td class="p-2"><input type="number" class="w-16" data-id="${item.id}" data-field="Quantidade" value="${item.Quantidade || 1}"></td>
+                <td class="p-2"><input type="text" class="w-48" data-id="${item.id}" data-field="Observação" value="${escapeHtml(item.Observação || '')}"></td>
+            </tr>
+        `).join('');
     }
 }
 
@@ -123,18 +331,46 @@ function populatePendingTransfersTab() { /* ... Lógica de transferências pende
 function setupListeners() {
     // Auth Listener
     addAuthListener(user => {
-// ... existing code ...
-// ... existing code ...
+        const isLoggedIn = !!user;
+        setState({ isLoggedIn, user, authReady: true });
+        if (isLoggedIn) {
+            loadData(false); // Inicia o carregamento de dados quando logado
+        }
+    });
+
+    // Forçar Atualização
+    DOM.forceRefreshBtn.addEventListener('click', () => loadData(true));
+    DOM.logoutBtn.addEventListener('click', () => { handleLogout(); window.location.href = 'index.html'; });
+    
     // Navegação por Abas
     DOM.navButtons.forEach(button => {
         button.addEventListener('click', (e) => {
-// ... existing code ...
-// ... existing code ...
+            const tabName = e.currentTarget.dataset.tab;
+            DOM.navButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabName));
+            DOM.contentPanes.forEach(pane => pane.classList.toggle('hidden', !pane.id.includes(tabName)));
+            // Chama a renderização da aba se necessário (ex: Conciliação, Transferências)
+        });
+    });
+    
     // --- Listeners da Aba: Inventário Editável ---
     DOM.editTableBody.addEventListener('change', (e) => {
         // ... (Lógica para marcar item como 'dirty' e salvar no estado local/transitorio)
-// ... existing code ...
-// ... existing code ...
+        const target = e.target;
+        const id = target.dataset.id;
+        const field = target.dataset.field;
+        let value = target.value;
+
+        if (field === 'Quantidade') value = parseInt(value, 10) || 1;
+
+        if (id && field) {
+            const currentChanges = dirtyItems.get(id) || {};
+            dirtyItems.set(id, { ...currentChanges, [field]: value });
+            document.getElementById(`row-${id}`).classList.add('is-dirty');
+            DOM.saveAllChangesBtn.disabled = false;
+        }
+    });
+
+    // Salvar todas as alterações (simplificado)
     DOM.saveAllChangesBtn.addEventListener('click', async () => {
         if (dirtyItems.size === 0) return;
         showOverlay(`Salvando ${dirtyItems.size} alterações...`);
@@ -149,6 +385,7 @@ function setupListeners() {
         try {
             await batch.commit();
             dirtyItems.clear();
+            DOM.saveAllChangesBtn.disabled = true;
             showNotification(`${dirtyItems.size} alterações salvas com sucesso!`, 'success');
             // Recarregar dados para refletir mudanças
             await loadData(true); 
@@ -289,7 +526,7 @@ function setupListeners() {
             : '<p class="p-4 text-slate-500 text-center">Nenhum item "S/T" encontrado para esta unidade.</p>';
 
         // 2. Popula Itens do GIAP (Disponíveis)
-        const giapUnitsForSystemUnit = unitMapping[selectedUnit] || [];
+        const giapUnitsForSystemUnit = (unitMapping && unitMapping[selectedUnit]) ? unitMapping[selectedUnit] : [];
         DOM.giapListUnitName.textContent = giapUnitsForSystemUnit.join(', ') || 'Nenhuma unidade GIAP ligada';
         
         const giapItems = [];
@@ -324,5 +561,18 @@ function setupListeners() {
     // Fechar Modais (Overlay ou Botão genérico)
     document.addEventListener('click', (e) => { 
         if (e.target.matches('.js-close-modal') || e.target.matches('.modal-overlay')) { 
-// ... existing code ...
+            e.target.closest('.modal')?.classList.add('hidden'); 
+        } 
+    });
+}
 
+// --- INICIALIZAÇÃO ---
+function init() {
+    // 1. Assina o Listener Global
+    subscribe(updateUIFromState);
+
+    // 2. Configura Listeners de Eventos
+    setupListeners();
+}
+
+document.addEventListener('DOMContentLoaded', init);
