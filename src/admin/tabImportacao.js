@@ -604,8 +604,12 @@ function openManualLinkModal(rowIndex) {
         .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName))
         .filter(i => {
             const tombo = normalizeTombo(i.Tombamento);
-            // Mostrar APENAS S/T (Tombo vazio ou 's/t') E que não sejam PERMUTA
-            return (tombo === 's/t' || tombo === '') && !i.isPermuta;
+            // CORREÇÃO (O foco): Mostrar APENAS S/T (Tombo vazio ou 's/t') E que não sejam PERMUTA
+            // Itens com QUALQUER número de tombamento (incluindo '014032' normalizado para '14032') são EXCLUÍDOS.
+            const isNoTombo = (tombo === 's/t' || tombo === '');
+            const isNotPermuta = !i.isPermuta;
+            
+            return isNoTombo && isNotPermuta;
         })
         .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
     
