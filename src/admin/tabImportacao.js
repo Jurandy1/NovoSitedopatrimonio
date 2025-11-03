@@ -272,12 +272,21 @@ function processUnitMappingAndLoadItems() {
         const pastedUnitName = pastedItem.unidade || '';
         const systemUnitName = multiUnitImportData.unitMap.get(pastedUnitName);
 
-        // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO) ---
-        // 1. Ignora se for Permuta. Itens S/T (sem tombo) AGORA SÃO PERMITIDOS para atualização de metadados.
+        // --- FILTRO DE ENTRADA RÍGIDO (REQUISITO DO USUÁRIO) ---
         const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
-        if (pastedTombo.toLowerCase().includes('permuta')) { // Apenas permuta é bloqueado explicitamente.
+        const isPastedTomboValid = pastedTombo && pastedTombo !== 's/t' && pastedTombo.toLowerCase() !== 'permuta';
+        const isPastedDoacao = normalizeStr(extractOrigemDoacao(pastedItem)).includes('doacao');
+
+        // REGRA 1 & 2: Descarta se for S/T E não for Doação.
+        if ((pastedTombo === 's/t' || pastedTombo === '') && !isPastedDoacao) {
              return; 
         }
+        
+        // REGRA de Permuta: Ignora se for Permuta.
+        if (pastedTombo.toLowerCase().includes('permuta')) {
+             return; 
+        }
+        
         // 2. Ignora se a unidade não foi mapeada ou foi ignorada
         if (!systemUnitName) {
             return;
@@ -355,6 +364,7 @@ function findBestMatch(pastedItem, itemsPool) {
     // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
     const stCandidates = itemsPool.filter(item => {
         const tombo = normalizeTombo(item.Tombamento);
+        // REGRA 3: Apenas S/T (sem numeração) e não Permuta pode ser ligado
         return (tombo === 's/t' || tombo === '') && !item.isPermuta;
     });
 
