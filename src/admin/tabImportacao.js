@@ -57,7 +57,9 @@ let multiUnitImportData = {
     pasted: [], // Todos os itens colados
     unitMap: new Map(), // Mapeamento: "Unidade Colada" -> "Unidade Sistema"
     fieldUpdates: {}, // Campos a atualizar: { Tombamento: true, ... }
-    comparisonData: [] // Dados de comparação item-a-item
+    comparisonData: [], // Dados de comparação item-a-item
+    // NOVO: Pool de itens S/T do sistema, inicializado após o load
+    stItemsInManualLinkPool: [] 
 };
 // INÍCIO DA ALTERAÇÃO: Adiciona estado para o modal de ligação manual
 let selPastedItemIndex = null; // Rastreia qual item "Não Encontrado" está sendo ligado
@@ -145,6 +147,12 @@ export function populateImportAndReplaceTab() {
 
     selects.forEach(select => {
         if(select) select.innerHTML = '<option value="">Selecione um Tipo</option>' + tipos.map(t => `<option value="${t}">${t}</option>`).join('');
+    });
+    
+    // NOVO: Inicializa o pool de itens S/T do sistema (apenas itens sem tombo e não permuta)
+    multiUnitImportData.stItemsInManualLinkPool = patrimonioFullList.filter(i => {
+        const tombo = normalizeTombo(i.Tombamento);
+        return (tombo === 's/t' || tombo === '') && !i.isPermuta;
     });
 }
 
@@ -611,38 +619,37 @@ function openManualLinkModal(rowIndex) {
     // 2. Preenche o nome da unidade
     DOM_IMPORT.manualLinkUnitName.textContent = systemUnitName;
 
-    // 3. Filtra e preenche o select com itens do sistema (Apenas itens S/T para ligação)
-    const allStCandidates = patrimonioFullList
-        .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName))
-        .filter(i => {
-            const tombo = normalizeTombo(i.Tombamento);
-            // CORREÇÃO (O foco): Mostrar APENAS S/T (Tombo vazio ou 's/t') E que não sejam PERMUTA
-            // Itens com QUALQUER número de tombamento (incluindo '014032' normalizado para '14032') são EXCLUÍDOS.
-            const isNoTombo = (tombo === 's/t' || tombo === '');
-            const isNotPermuta = !i.isPermuta;
-            
-            return isNoTombo && isNotPermuta;
-        })
-        .sort((a, b) => (a.Descrição || '').localeCompare(b.Descrição || ''));
+    // --- LÓGICA DE FILTRAGEM DO SISTEMA (REGRA 1 & 2) ---
+    const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
     
-    let systemItems = allStCandidates;
+    // 3. Filtra e preenche o select com itens do sistema (Apenas itens S/T do pool disponível)
+    let stCandidates = multiUnitImportData.stItemsInManualLinkPool
+        .filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnitName));
+        
+    // 4. Classificação por Similaridade (Regra 2)
+    const candidatesWithScore = stCandidates.map(item => {
+        const score = calculateSimilarity(pastedDesc, normalizeStr(item.Descrição));
+        return { item, score };
+    }).filter(c => c.score > 0.3); // Filtra os com baixa similaridade (Regra 2)
+    
+    // Ordena por score (nomes idênticos/próximos primeiro)
+    candidatesWithScore.sort((a, b) => b.score - a.score);
+
+    let systemItems = candidatesWithScore.map(c => c.item);
     let localMatchesCount = 0;
 
-    // Lógica de Filtragem por Local (Req do Usuário)
+    // Lógica de Filtragem por Local (Apenas para mensagem/sugestão visual)
     if (pastedLocal) {
-        const localMatches = allStCandidates.filter(item => 
+        const localMatches = systemItems.filter(item => 
             normalizeStr(item.Localização) === pastedLocal
         );
         localMatchesCount = localMatches.length;
         
-        // Se houver correspondências de local, mostra APENAS elas.
-        // Se não houver, mantém a lista completa de S/T para que o usuário ligue.
-        if (localMatches.length > 0) {
-            systemItems = localMatches;
-        }
+        // Se houver correspondências de local, prioriza a exibição delas (embora a ordenação por score já ajude)
+        // Optamos por manter a ordenação por score, mas a mensagem reflete se há matches de local.
     }
     
-    // 4. Preenche o select com a Localização, Estado E ORIGEM (ATUALIZADO)
+    // 5. Preenche o select com a Localização, Estado E ORIGEM (ATUALIZADO)
     DOM_IMPORT.manualLinkSystemItemSelect.innerHTML = '<option value="">-- Selecione um item --</option>' +
         systemItems.map(item => `
             <option value="${item.id}">
@@ -653,19 +660,26 @@ function openManualLinkModal(rowIndex) {
             </option>
         `).join('');
 
-    // 5. Exibe a mensagem de filtro (ADICIONADA NO HTML na resposta anterior, mas a lógica está aqui)
+    // 6. Exibe a mensagem de filtro
     const filterMessage = document.getElementById('manual-link-filter-message');
     if (filterMessage) {
-        if (localMatchesCount > 0) {
-             filterMessage.innerHTML = `<span class="font-semibold text-green-700">${localMatchesCount} itens filtrados</span> com Localização correspondente à planilha.`;
-        } else if (pastedLocal) {
-             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> Listando todos os S/T desta unidade.`;
+        if (candidatesWithScore.length === 0) {
+            filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T parecido encontrado para ligação manual na unidade.</span>`;
+        } else if (localMatchesCount > 0) {
+             filterMessage.innerHTML = `<span class="font-semibold text-green-700">${candidatesWithScore.length} itens sugeridos.</span> ${localMatchesCount} deles têm Localização correspondente.`;
         } else {
-             filterMessage.innerHTML = `Listando todos os itens S/T desta unidade.`;
+             filterMessage.innerHTML = `<span class="font-semibold text-blue-700">${candidatesWithScore.length} itens sugeridos</span> por similaridade de nome (melhores sugestões primeiro).`;
         }
     }
+    
+    // --- NOVO: Lógica para limpar o item selecionado do pool ao abrir o modal ---
+    if (systemItems.length > 0) {
+        const firstSuggestionId = systemItems[0].id;
+        // Marca o primeiro item como selecionado (sugestão)
+        DOM_IMPORT.manualLinkSystemItemSelect.value = firstSuggestionId; 
+    }
 
-    // 6. Reseta o checkbox e abre o modal
+    // 7. Reseta o checkbox e abre o modal
     DOM_IMPORT.manualLinkUpdateDesc.checked = false;
     DOM_IMPORT.manualLinkModal.classList.remove('hidden');
 }
@@ -688,6 +702,9 @@ function confirmManualLink() {
     if (!systemItem) {
         return showNotification('Erro: Item do sistema não encontrado.', 'error');
     }
+    
+    // NOVO: Remove o item S/T do pool para evitar re-seleção (Regra 1)
+    multiUnitImportData.stItemsInManualLinkPool = multiUnitImportData.stItemsInManualLinkPool.filter(item => item.id !== systemId);
 
     // Atualiza a linha de comparação em memória
     const comparisonRow = multiUnitImportData.comparisonData[selPastedItemIndex];
@@ -1002,7 +1019,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
     // ETAPA 1: Clique em "Pré-visualizar Unidades"
     DOM_IMPORT.previewEditByDescBtn.addEventListener('click', () => {
         // Reseta o estado local
-        multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] };
+        multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: multiUnitImportData.stItemsInManualLinkPool };
 
         const data = DOM_IMPORT.editByDescData.value;
         if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
@@ -1122,17 +1139,63 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // (Req 2) Listeners para o novo modal
-    if (DOM_IMPORT.manualLinkConfirmBtn) {
-        DOM_IMPORT.manualLinkConfirmBtn.addEventListener('click', confirmManualLink);
-    }
-    document.body.addEventListener('click', (e) => {
-        if (e.target.matches('.js-close-modal-manual-link') || e.target.matches('.modal-overlay')) {
-            e.target.closest('.modal')?.classList.add('hidden');
+    // (Regra 1) Adiciona um listener no modal de ligação manual para garantir que o item volte ao pool se o modal for fechado sem salvar.
+    document.getElementById('manual-link-modal').addEventListener('click', (e) => {
+        const isClosing = e.target.matches('.js-close-modal-manual-link') || e.target.matches('.modal-overlay');
+        const isCancelling = e.target.id === 'manual-link-cancel-btn'; // Supondo que exista um botão Cancelar
+        
+        if ((isClosing || isCancelling) && selPastedItemIndex !== null) {
+            // Se o modal está sendo fechado sem confirmar a ligação:
+            const selectedItemId = DOM_IMPORT.manualLinkSystemItemSelect.value;
+            
+            // Coloca o item de volta no pool se ele foi removido anteriormente
+            if (selectedItemId) {
+                const systemItem = getState().patrimonioFullList.find(i => i.id === selectedItemId);
+                if (systemItem && !multiUnitImportData.stItemsInManualLinkPool.some(i => i.id === selectedItemId)) {
+                    multiUnitImportData.stItemsInManualLinkPool.push(systemItem);
+                }
+            }
+        }
+        // Fechar o modal de forma limpa
+        if (isClosing) {
+            DOM_IMPORT.manualLinkModal.classList.add('hidden');
         }
     });
-    // FIM DA ALTERAÇÃO
+    
+    // (Regra 1) Criação do botão de Cancelar (a função confirmManualLink já lida com o sucesso)
+    DOM_IMPORT.manualLinkConfirmBtn.addEventListener('click', confirmManualLink);
 
+    // (Regra 1) Implementar o Cancelar
+    const manualLinkModal = document.getElementById('manual-link-modal');
+    if (manualLinkModal) {
+        // Criar botão Cancelar no modal
+        const confirmBtn = DOM_IMPORT.manualLinkConfirmBtn;
+        if (confirmBtn) {
+            const container = confirmBtn.closest('.flex.justify-end');
+            if (container && !container.querySelector('#manual-link-cancel-btn')) {
+                 const cancelBtn = document.createElement('button');
+                 cancelBtn.type = 'button';
+                 cancelBtn.id = 'manual-link-cancel-btn';
+                 cancelBtn.className = 'px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300';
+                 cancelBtn.textContent = 'Cancelar';
+                 container.prepend(cancelBtn);
+                 
+                 cancelBtn.addEventListener('click', () => {
+                      const selectedItemId = DOM_IMPORT.manualLinkSystemItemSelect.value;
+                      if (selectedItemId) {
+                           const systemItem = getState().patrimonioFullList.find(i => i.id === selectedItemId);
+                           if (systemItem && !multiUnitImportData.stItemsInManualLinkPool.some(i => i.id === selectedItemId)) {
+                               multiUnitImportData.stItemsInManualLinkPool.push(systemItem);
+                           }
+                      }
+                      manualLinkModal.classList.add('hidden');
+                      selPastedItemIndex = null;
+                      showNotification('Ligação manual cancelada.', 'info');
+                 });
+            }
+        }
+    }
+    
     // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
@@ -1291,7 +1354,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
                  DOM_IMPORT.editByDescResults.classList.add('hidden');
                  DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
                  DOM_IMPORT.editByDescData.value = '';
-                 multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [] }; // Reseta estado local
+                 multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: multiUnitImportData.stItemsInManualLinkPool }; // Reseta estado local
                  showNotification('Todas as ações selecionadas foram salvas. Recarregue a página para começar um novo lote.', 'info');
             }
             
