@@ -1335,13 +1335,23 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 const estadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
                 const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
                 const origemDoacao = extractOrigemDoacao(pastedItem);
+                
+                // --- INÍCIO DA CORREÇÃO DE BUG CRÍTICO (Adicionado) ---
+                // 1. Tenta encontrar o Tipo correto da unidade de destino no inventário existente
+                const existingItemInUnit = getState().patrimonioFullList.find(i => 
+                    normalizeStr(i.Unidade) === normalizeStr(systemUnitName)
+                );
+                
+                // 2. Define o Tipo - usa o tipo de um item existente ou o padrão de auditoria
+                let itemType = existingItemInUnit?.Tipo || 'N/A (AUDITORIA)'; 
+                // --- FIM DA CORREÇÃO DE BUG CRÍTICO ---
+
 
                 const newItem = {
                     id: docRef.id,
                     Tombamento: pastedTombo, // O filtro de entrada garante que é numérico aqui
                     Descrição: pastedItem.descricao || pastedItem.item || 'Item sem descrição',
-                    // Tipo é incerto, usamos N/A ou o tipo de outra unidade similar
-                    Tipo: 'N/A (AUDITORIA)', 
+                    Tipo: itemType, // <-- AGORA USA O TIPO ENCONTRADO
                     Unidade: systemUnitName, 
                     Localização: pastedItem.local || pastedItem.localizacao || '',
                     Fornecedor: '', 
