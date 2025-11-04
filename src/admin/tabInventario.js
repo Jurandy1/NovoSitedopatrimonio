@@ -9,8 +9,9 @@ import { showNotification, showOverlay, hideOverlay, normalizeStr, debounce, esc
 import { idb } from '../services/cache.js';
 
 // --- ESTADO LOCAL/TRANSITÓRIO ---
+// ATUALIZADO: Adicionada 'localizacao' ao filtro
 let dirtyItems = new Map();
-let currentEditFilter = { tipo: '', unidade: '', estado: '', descricao: '' };
+let currentEditFilter = { tipo: '', unidade: '', estado: '', descricao: '', localizacao: '' };
 
 const DOM_EDIT_INV = {
     editTableBody: document.getElementById('edit-table-body'),
@@ -19,6 +20,8 @@ const DOM_EDIT_INV = {
     filtroUnidade: document.getElementById('edit-filter-unidade'),
     filtroEstado: document.getElementById('edit-filter-estado'),
     filtroDescricao: document.getElementById('edit-filter-descricao'),
+    // NOVO: Adicionado filtro de localização
+    filtroLocalizacao: document.getElementById('edit-filter-localizacao'),
     deleteSelectedBtn: document.getElementById('delete-selected-btn'),
     deleteSelectedCount: document.getElementById('delete-selected-count'),
     selectAllCheckbox: document.getElementById('select-all-checkbox'),
@@ -73,11 +76,14 @@ export function renderEditableTable() {
     const { patrimonioFullList } = getState();
     
     const filteredItems = patrimonioFullList.filter(item => {
-        const { tipo, unidade, estado, descricao } = currentEditFilter;
+        // ATUALIZADO: Inclui 'localizacao' no desestruturamento
+        const { tipo, unidade, estado, descricao, localizacao } = currentEditFilter;
         if (tipo && normalizeStr(item.Tipo) !== normalizeStr(tipo)) return false;
         if (unidade && normalizeStr(item.Unidade) !== normalizeStr(unidade)) return false;
         if (estado && getNormalizedEstado(item.Estado) !== estado) return false;
         if (descricao && !normalizeStr(item.Descrição).includes(descricao)) return false;
+        // NOVO FILTRO: Verifica a Localização
+        if (localizacao && !normalizeStr(item.Localização).includes(localizacao)) return false;
         return true;
     });
 
@@ -227,6 +233,8 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
     // Listener para filtros
     const debouncedRender = debounce(() => {
         currentEditFilter.descricao = DOM_EDIT_INV.filtroDescricao.value;
+        // NOVO: Atualiza o filtro de localização
+        currentEditFilter.localizacao = DOM_EDIT_INV.filtroLocalizacao.value;
         renderEditableTable();
     }, 300);
 
@@ -266,6 +274,8 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
     });
     
     DOM_EDIT_INV.filtroDescricao.addEventListener('input', debouncedRender);
+    // NOVO LISTENER: Filtro de localização
+    DOM_EDIT_INV.filtroLocalizacao.addEventListener('input', debouncedRender);
 
 
     // Listener para mudanças na tabela (marca como "sujo")
