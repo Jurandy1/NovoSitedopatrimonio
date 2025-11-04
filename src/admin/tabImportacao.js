@@ -968,6 +968,9 @@ function generateBulkReplaceActions() {
     
     let validMappingFound = false;
 
+    // NOVO: Conjunto de Tombos do Sistema que foram ATUALIZADOS/MATCHED nesta execução
+    const matchedSystemTombos = new Set(); 
+
     mappingSelects.forEach(select => { // CORRIGIDO: Agora itera sobre a NodeList corretamente
         const pastedUnit = select.dataset.pastedUnit; // CORRIGIDO: Usando camelCase
         const confirmedSystemUnit = select.value;
@@ -983,16 +986,19 @@ function generateBulkReplaceActions() {
         const pastedItems = bulkReplaceState.pastedItemsByUnit.get(pastedUnit) || [];
         const systemItems = bulkReplaceState.systemItemsByUnit.get(confirmedSystemUnit) || [];
         
-        // Mapeia itens do sistema por Tombamento (para lookup rápido)
-        const systemItemsByTombo = new Map(systemItems.map(item => [normalizeTombo(item.Tombamento), item]));
-        const tombosSystem = new Set(systemItemsByTombo.keys()); // Tombos existentes no sistema (da unidade de destino)
+        // NOVO: Mapeia itens da planilha por Tombamento (para lookup rápido de EXISTÊNCIA)
+        const pastedItemsByTombo = new Map(pastedItems.map(item => [normalizeTombo(item.tombamento || item.tombo), item]));
+        const pastedTombos = new Set(pastedItemsByTombo.keys()); // Tombos existentes na planilha (para a DELEÇÃO)
 
+        // Mapeia itens do sistema por Tombamento (para lookup rápido de ATUALIZAÇÃO)
+        const systemItemsByTombo = new Map(systemItems.map(item => [normalizeTombo(item.Tombamento), item]));
+        
         // --- Loop 1: Itens da Planilha (Criação/Atualização) ---
         pastedItems.forEach(pastedItem => {
             const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
             
             if (!pastedTombo || pastedTombo === 's/t') {
-                 bulkReplaceState.previewActions.push({ action: 'IGNORE', type: 'Planilha Ignorada', pasted: pastedItem, system: null, reason: 'Item S/T ou sem Tombo.', systemUnitDestino: confirmedSystemUnit });
+                 bulkReplaceState.previewActions.push({ action: 'IGNORE', type: 'Planilha Ignorada', pasted: pastedItem, system: null, reason: 'Item S/T ou sem Tombo na planilha colada (Ignorado).', systemUnitDestino: confirmedSystemUnit });
                  return;
             }
 
@@ -1001,7 +1007,7 @@ function generateBulkReplaceActions() {
             if (systemMatch) {
                 // AÇÃO 1: ATUALIZAR
                 bulkReplaceState.previewActions.push({ action: 'UPDATE', type: 'Atualizar Item', pasted: pastedItem, system: systemMatch, reason: 'Tombo encontrado. Dados serão sincronizados.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
-                tombosSystem.delete(pastedTombo); // Remove do set de tombos do sistema para a próxima etapa (DELETE)
+                matchedSystemTombos.add(pastedTombo); // Marca como MATCHED
             } else {
                 // AÇÃO 2: CRIAR NOVO
                  bulkReplaceState.previewActions.push({ action: 'CREATE', type: 'Criar Novo Item', pasted: pastedItem, system: null, reason: 'Tombo da planilha não encontrado na unidade de destino.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
@@ -1009,12 +1015,28 @@ function generateBulkReplaceActions() {
         });
         
         // --- Loop 2: Itens do Sistema (Exclusão/Checagem) ---
-        // Todos os Tombos remanescentes em tombosSystem são SOBRAS no sistema que não estão na planilha (serão DELETADOS)
+        // A lógica do usuário é: O que não está na planilha, apaga.
         systemItems.forEach(systemItem => {
             const systemTombo = normalizeTombo(systemItem.Tombamento);
-            if (tombosSystem.has(systemTombo)) {
+
+            // Condição para DELEÇÃO (Substituir TUDO):
+            // Se o Tombo do sistema NÃO ESTÁ na lista de Tombos da planilha colada, DELETA.
+            // Isso garante que itens Tombados ausentes E todos os itens S/T sejam deletados, 
+            // já que a planilha colada não deve ter S/T (por Loop 1).
+            const isMissingFromPasted = !pastedTombos.has(systemTombo);
+
+            if (isMissingFromPasted) {
                 // AÇÃO 3: EXCLUIR (Sobra no Sistema)
-                bulkReplaceState.previewActions.push({ action: 'DELETE', type: 'Excluir Item', pasted: null, system: systemItem, reason: 'Item do sistema não encontrado na planilha de origem. Será excluído para sincronia.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
+                bulkReplaceState.previewActions.push({ 
+                    action: 'DELETE', 
+                    type: 'Excluir Item', 
+                    pasted: null, 
+                    system: systemItem, 
+                    // MENSAGEM ATUALIZADA para refletir a nova regra de "apagar TUDO"
+                    reason: `Item do sistema não encontrado na planilha de origem (ou era S/T). Será excluído para SUBSTITUIR o inventário.`, 
+                    systemUnitDestino: confirmedSystemUnit, 
+                    systemTypeDestino: bulkReplaceState.selectedTipo 
+                });
             }
         });
     });
@@ -1704,3 +1726,13 @@ export function setupImportacaoListeners(reloadDataCallback) {
     // Passo 6: Botão "Confirmar Ações em Lote"
     DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', () => confirmBulkReplace(reloadDataCallback));
 }
+```
+
+O código fornecido em `src/admin/tabImportacao.js` já foi atualizado com a lógica de exclusão mais rigorosa para a aba "Substituir Unidades em Massa". A mensagem de razão da exclusão no Passo 5 (Função `generateBulkReplaceActions` - Loop 2) foi ajustada para ser mais clara:
+
+```javascript
+// ... dentro de generateBulkReplaceActions, Loop 2:
+// ...
+// MENSAGEM ATUALIZADA para refletir a nova regra de "apagar TUDO"
+reason: `Item do sistema não encontrado na planilha de origem (ou era S/T). Será excluído para SUBSTITUIR o inventário.`, 
+// ...
