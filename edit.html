@@ -363,6 +363,7 @@
                         <button class="sub-nav-btn hidden" data-subtab="substituir">Substituir Inventário</button>
                         <button class="sub-nav-btn active" data-subtab="edit-by-desc">Importar e Atualizar Unidade</button>
                         <button class="sub-nav-btn" data-subtab="massa">Importar por Tombamento</button>
+                        <button class="sub-nav-btn" data-subtab="bulk_unit_replace">Substituir Unidades em Massa</button> <!-- NOVO -->
                         <button class="sub-nav-btn" data-subtab="add_giap">Adicionar Unidade GIAP</button>
                     </div>
             
@@ -522,6 +523,78 @@
                             <div id="mass-transfer-list" class="space-y-2"></div>
                             <div class="mt-6">
                                 <button id="mass-transfer-confirm-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">Confirmar Criação em Massa</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-Aba: Substituir Unidades em Massa (NOVA) -->
+                    <div id="subtab-content-bulk_unit_replace" class="hidden">
+                         <h2 class="text-xl font-bold text-slate-800 mb-2">Substituir/Atualizar Unidades em Massa</h2>
+                         <p class="text-sm text-slate-600 mb-4">
+                            Cole sua planilha com a coluna <strong>UNIDADE</strong>. O sistema irá:
+                            <ol class="list-decimal list-inside pl-4 mt-2">
+                                <li>Identificar a <strong>Unidade de Origem (Planilha)</strong> selecionada abaixo.</li>
+                                <li>Aplicar todas as linhas dessa unidade colada na <strong>Unidade de Destino (Sistema)</strong>.</li>
+                                <li>Itens existentes na Destino que não estão na Origem (Planilha) serão <strong>EXCLUÍDOS</strong> (se Tombado) ou marcados para checagem.</li>
+                            </ol>
+                            <strong class="text-red-600">Use com extremo cuidado.</strong>
+                         </p>
+
+                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 p-4 border rounded-lg bg-slate-50">
+                            <div>
+                                <label for="bulk-replace-tipo" class="block text-sm font-medium mb-1">1. Tipo de Unidade de Destino</label>
+                                <select id="bulk-replace-tipo" class="w-full p-2 border rounded-lg bg-white"></select>
+                            </div>
+                            <div>
+                                <label for="bulk-replace-system-unit" class="block text-sm font-medium mb-1">2. Unidade de Destino (A ser substituída/atualizada)</label>
+                                <select id="bulk-replace-system-unit" class="w-full p-2 border rounded-lg bg-white" disabled></select>
+                            </div>
+                            <div class="self-end pt-2">
+                                <button id="load-system-unit-btn" class="w-full bg-slate-600 text-white px-4 py-2 rounded-lg hover:bg-slate-700 disabled:bg-slate-400" disabled>Carregar Inventário</button>
+                            </div>
+                         </div>
+                         
+                         <!-- Colar Dados -->
+                         <div class="mb-4">
+                            <label for="bulk-replace-data" class="block text-base font-semibold mb-2 text-slate-800">3. Cole os dados do Excel aqui (com cabeçalho)</label>
+                            <p class="text-xs text-slate-500 mb-2">
+                                O sistema espera as colunas: <strong>Tipo</strong>, <strong>Tombamento</strong>, <strong>Descrição</strong>, <strong>Unidade</strong>, <strong>Quantidade</strong>, <strong>Localização</strong>, <strong>Estado</strong>, <strong>Origem da Doação</strong>, <strong>Observação</strong>, <strong>Fornecedor</strong>.
+                            </p>
+                            <textarea id="bulk-replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
+                         </div>
+                         <button id="preview-bulk-replace-btn" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">4. Visualizar Comparações</button>
+
+
+                         <!-- Resultados da Comparação -->
+                         <div id="bulk-replace-results" class="hidden mt-6 border-t pt-4">
+                            <h3 class="font-bold text-slate-700 mb-2 text-base">5. Confirme a Unidade de Origem da Planilha e Revise</h3>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 p-4 border rounded-lg bg-yellow-50">
+                                <div>
+                                    <label for="bulk-replace-pasted-unit" class="block text-sm font-medium mb-1">Unidades Encontradas na Planilha Colada</label>
+                                    <select id="bulk-replace-pasted-unit" class="w-full p-2 border rounded-lg bg-white"></select>
+                                </div>
+                                <div class="self-end pt-2">
+                                    <button id="filter-bulk-replace-unit-btn" class="w-full bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 disabled:bg-slate-400">Filtrar Itens e Gerar Ações</button>
+                                </div>
+                            </div>
+
+                             <div id="bulk-replace-summary" class="p-3 bg-slate-100 rounded-lg font-semibold text-sm mb-4"></div>
+
+                             <div id="bulk-replace-preview-table-container" class="reconciliation-container overflow-y-auto space-y-2 p-2 bg-slate-50 border rounded-lg">
+                                <!-- Tabela de pré-visualização de ações será inserida aqui pelo JS -->
+                             </div>
+                             
+                             <div class="mt-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+                                <div class="flex items-start">
+                                    <input type="checkbox" id="bulk-replace-confirm-checkbox" class="mt-1 h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
+                                    <label for="bulk-replace-confirm-checkbox" class="ml-3 block text-sm font-medium text-red-800">
+                                        Eu entendo que os itens listados como **Excluir** serão removidos e que o inventário de **${currentEditFilter.unidade || 'Unidade de Destino'}** será <strong class="font-bold">TOTALMENTE SINCRONIZADO</strong> com a planilha colada.
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="mt-4">
+                                <button id="confirm-bulk-replace-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:bg-slate-400" disabled>6. Confirmar Ações em Lote</button>
                             </div>
                         </div>
                     </div>
