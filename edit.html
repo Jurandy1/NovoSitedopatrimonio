@@ -456,6 +456,18 @@
                             
                              <!-- Controles de Ação em Massa -->
                              <div class="p-3 bg-slate-100 rounded-lg flex flex-wrap items-center gap-4 mb-4">
+                                 <!-- NOVO FILTRO DE AÇÃO -->
+                                 <div class="flex items-center gap-2">
+                                    <label for="edit-by-desc-action-filter" class="text-sm font-medium text-slate-700">Filtrar por Ação:</label>
+                                    <select id="edit-by-desc-action-filter" class="p-2 border rounded-lg bg-white text-sm">
+                                        <option value="all">Todos</option>
+                                        <option value="update">Atualizar</option>
+                                        <option value="ignore">Ignorar</option>
+                                        <option value="create_new">Criar Novo</option>
+                                        <option value="manual">Manual</option>
+                                    </select>
+                                 </div>
+                                 <!-- FIM NOVO FILTRO -->
                                 <label class="flex items-center font-medium">
                                     <input type="checkbox" id="edit-by-desc-select-all" class="h-4 w-4 mr-2">
                                     Selecionar Todos
@@ -464,6 +476,7 @@
                                     <option value="">-- Ação em Massa --</option>
                                     <option value="update">Atualizar Selecionados</option>
                                     <option value="ignore">Ignorar Selecionados</option>
+                                    <option value="create_new">Criar Novo Selecionados</option>
                                 </select>
                                 <button id="edit-by-desc-bulk-apply" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">Aplicar</button>
                                 <span id="edit-by-desc-summary" class="text-sm font-semibold text-slate-700 ml-auto"></span>
