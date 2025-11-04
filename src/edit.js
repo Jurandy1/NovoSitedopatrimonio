@@ -9,8 +9,8 @@
 // CORREÇÃO: Adicionada a variável 'db' e removidos comandos duplicados
 import { auth, addAuthListener, handleLogout, loadFirebaseInventory, loadUnitMappingFromFirestore, loadReconciledUnits, loadCustomGiapUnits, loadConciliationPatterns, writeBatch, doc, updateDoc, serverT, db } from './services/firebase.js';
 import { loadGiapInventory } from './services/giapService.js';
-// CORREÇÃO ESSENCIAL: Adicionando 'isCacheStale', 'loadFromCache', e 'updateLocalCache'
-import { isCacheStale, loadFromCache, updateLocalCache } from './services/cache.js'; 
+// CORREÇÃO ESSENCIAL: Adicionando 'idb' para acesso ao cache no modal de sincronização
+import { isCacheStale, loadFromCache, updateLocalCache, idb } from './services/cache.js'; 
 // INÍCIO DA ALTERAÇÃO: Importar normalizeTombo
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo } from './utils/helpers.js';
 // FIM DA ALTERAÇÃO
@@ -287,7 +287,7 @@ async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
  */
 function renderGiapInventoryTable(giapInventory) {
     const container = document.getElementById('giap-table-body');
-    const headerRow = document.querySelector('#content-giap thead tr');
+    const headerRow = document.querySelector('#content-giap re');
     
     if (!container || !headerRow) return;
     
