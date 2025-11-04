@@ -159,7 +159,7 @@ function renderSavedMappings() {
 
 // --- LISTENERS ---
 
-export function setupLigarUnidadesListeners() {
+export function setupLigarUnidadesListeners(reloadDataCallback) { // <--- RECEBE O CALLBACK
     // Filtra unidades do sistema ao mudar o tipo
     DOM_MAP.mapFilterTipo.addEventListener('change', () => {
         updateSystemUnitOptions();
@@ -203,6 +203,11 @@ export function setupLigarUnidadesListeners() {
             populateUnitMappingTab(); 
 
             showNotification('Mapeamento salvo com sucesso!', 'success');
+            
+            // CORREÇÃO: Força o recarregamento dos dados no Orquestrador
+            if (reloadDataCallback) {
+                reloadDataCallback(true); 
+            }
         } catch (error) {
             console.error("Erro ao salvar mapeamento:", error);
             showNotification('Erro ao salvar mapeamento.', 'error');
@@ -239,8 +244,13 @@ export function setupLigarUnidadesListeners() {
             
             // Re-popula a aba inteira
             populateUnitMappingTab(); 
-
+            
             showNotification('Mapeamento excluído!', 'success');
+            
+            // CORREÇÃO: Força o recarregamento dos dados no Orquestrador
+            if (reloadDataCallback) {
+                reloadDataCallback(true); 
+            }
         } catch (error) {
             console.error("Erro ao excluir mapeamento:", error);
             showNotification('Erro ao excluir mapeamento.', 'error');
