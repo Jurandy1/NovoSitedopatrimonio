@@ -1,7 +1,5 @@
-/**/**
- * /src/admin/tabInventario.js
- * Lógica da aba "Inventário Editável" (content-edicao).
- */
+// /src/admin/tabInventario.js
+// Lógica da aba "Inventário Editável" (content-edicao).
 
 // INÍCIO DA ALTERAÇÃO: Adicionado 'addDoc' para criar novos itens
 import { db, serverT, writeBatch, doc, updateDoc, deleteDoc, collection, addDoc } from '../services/firebase.js';
@@ -526,3 +524,4 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
         }
     });
 }
+
