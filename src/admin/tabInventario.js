@@ -345,7 +345,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
             return;
         }
         
-        // INÍCIO DA ALTERAÇÃO: Lógica de salvar-antes-de-sincronizar
+        // CORREÇÃO DO BUG DO USUÁRIO: Revertendo para usar o modal de escolha de descrição.
         if (target.classList.contains('sync-giap-btn')) {
             if (!id) return;
 
@@ -355,6 +355,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
 
             // 2. Verifica se o item está "sujo" (tem alterações pendentes)
             if (dirtyItems.has(id)) {
+                // O código abaixo garante que o item seja salvo no Firebase, estado e cache.
                 showOverlay('Salvando alterações pendentes antes de sincronizar...');
                 const changes = dirtyItems.get(id);
                 
@@ -381,7 +382,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                     
                     await idb.patrimonio.put(item); // Atualiza o cache IDB
 
-                    showNotification('Item salvo! Sincronizando...', 'success');
+                    showNotification('Item salvo! Verificando GIAP...', 'success');
                     hideOverlay();
 
                 } catch (error) {
@@ -390,77 +391,30 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                     showNotification('Erro ao salvar item. A sincronização foi cancelada.', 'error');
                     return; // Cancela a sincronização se o save falhar
                 }
+            } else {
+                 // Mesmo que não esteja sujo, pega o valor atual do campo Tombamento do DOM para a busca.
+                 const tomboInputEl = document.querySelector(`#row-${id} input[data-field="Tombamento"]`);
+                 if (tomboInputEl) {
+                     // Cria uma cópia temporária do item do estado com o Tombo do DOM
+                     item = { ...item, Tombamento: tomboInputEl.value };
+                 }
             }
 
-            // INÍCIO DA NOVA LÓGICA DE SINCRONIZAÇÃO DIRETA
 
-            // --- CORREÇÃO DE BUG: Lê o Tombo diretamente do campo de input (DOM) para garantir o valor mais recente ---
-            const tomboInputEl = document.querySelector(`#row-${id} input[data-field="Tombamento"]`);
-            const currentTomboValue = tomboInputEl ? tomboInputEl.value : item.Tombamento;
-
-            const { giapMapAllItems } = getState();
-            const tombo = normalizeTombo(currentTomboValue); // Usa o Tombo lido do campo de input
-            const giapItem = tombo ? giapMapAllItems.get(tombo) : null;
-
-            if (!giapItem) {
-                // Se não for encontrado, AÍ SIM abre o modal (que mostrará a msg de erro)
-                openSyncModalCallback(item);
-                return;
-            }
-
-            // Se foi encontrado, fazemos a atualização direta sem modal
-            showOverlay('Sincronizando dados do GIAP...');
-
-            // NÃO atualizamos a descrição, apenas os metadados
-            const changes = {
-                Fornecedor: giapItem['Nome Fornecedor'] || '',
-                NF: giapItem['NF'] || '',
-                Cadastro: giapItem['Cadastro'] || '',
-                'Tipo Entrada': giapItem['Tipo Entrada'] || '',
-                Unidade_Planilha: giapItem['Unidade'] || '', // Salva a unidade original da planilha
-                'Valor NF': giapItem['Valor NF'] || '',
-                Espécie: giapItem['Espécie'] || '',
-                Status_Planilha: giapItem['Status'] || '', // Salva o status original da planilha
-                // Preserva a observação existente, adicionando a mensagem de auditoria
-                Observação: `Metadados atualizados do GIAP (via 🔄). | ${item.Observação || ''}`, 
-                updatedAt: serverT()
-            };
-
-            try {
-                // 1. Salva no Firebase
-                const itemRef = doc(db, 'patrimonio', id);
-                await updateDoc(itemRef, changes);
-
-                // 2. Atualiza o estado global (patrimonioFullList) e o cache
-                const updatedItem = { ...item, ...changes };
-                const globalPatrimonioList = getState().patrimonioFullList;
-                const index = globalPatrimonioList.findIndex(i => i.id === id);
-                if (index > -1) {
-                    globalPatrimonioList[index] = updatedItem;
-                    setState({ patrimonioFullList: globalPatrimonioList });
-                }
-                await idb.patrimonio.put(updatedItem);
-
-                // 3. ATUALIZA A UI (os inputs na tabela)
-                const row = document.getElementById(`row-${id}`);
-                if (row) {
-                    // Atualiza os campos que o usuário vê
-                    row.querySelector('input[data-field="Fornecedor"]').value = changes.Fornecedor;
-                    row.querySelector('input[data-field="NF"]').value = changes.NF;
-                    row.querySelector('input[data-field="Observação"]').value = changes.Observação;
-                }
-
-                hideOverlay();
-                showNotification('Item sincronizado com GIAP!', 'success');
-
-            } catch (e) {
-                hideOverlay();
-                showNotification('Erro ao sincronizar item.', 'error');
-                console.error("Erro na sincronização direta:", e);
-            }
-            // FIM DA NOVA LÓGICA
+            // 7. SEMPRE abre o modal para forçar a checagem e a escolha da descrição.
+            // O `openSyncModalCallback` (que é `openSyncModal` em edit.js) lida com a busca
+            // no GIAP e a exibição do prompt de escolha da descrição.
+            openSyncModalCallback(item);
+            
         }
-        // FIM DA ALTERAÇÃO
+        // FIM DA CORREÇÃO
+
+        // INÍCIO DA ALTERAÇÃO: Listeners para o novo modal "Adicionar Item"
+        if (target.classList.contains('delete-row-btn')) return;
+        if (target.classList.contains('save-row-btn')) return;
+        if (target.classList.contains('sync-giap-btn')) return;
+
+        // ... (o restante dos listeners de clique na tabela, se houver) ...
     });
 
     // INÍCIO DA ALTERAÇÃO: Listeners para o novo modal "Adicionar Item"
