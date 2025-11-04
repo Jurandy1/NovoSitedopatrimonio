@@ -1177,7 +1177,7 @@ async function confirmBulkReplace(reloadDataCallback) {
                 Tombamento: tombo,
                 Descrição: pasted.descricao || pasted.item || 'Item sem descrição',
                 Unidade: action.systemUnitDestino, // Cria na unidade de destino
-                Quantidade: parseInt(pasted.quantidade, 10) || 1,
+                Quantidade: 1, // FIXO: 1, pois cada linha é uma unidade (removido pasted.quantidade)
                 Localização: pasted.localizacao || pasted.local || '',
                 Estado: normalizeEstadoConservacao(pasted['estado de conservacao'] || pasted.estado || 'Regular'),
                 'Origem da Doação': extractOrigemDoacao(pasted) || '',
@@ -1198,6 +1198,30 @@ async function confirmBulkReplace(reloadDataCallback) {
             itemsToDeleteFromCache.push(action.system.id);
         }
         
+        // Manter o UPDATE original para o caso de bug, mas ajustando a quantidade para 1
+        // NOTA: Este bloco não é mais atingido pelo fluxo de Substituição em Massa, mas é mantido
+        // para segurança do código original, caso seja chamado de outro lugar.
+        else if (action.action === 'UPDATE') {
+            const pasted = action.pasted;
+            const system = action.system;
+            
+            const changes = {
+                Tipo: pasted.tipo || action.systemTypeDestino || system.Tipo,
+                Tombamento: normalizeTombo(pasted.tombamento || pasted.tombo),
+                Descrição: pasted.descricao || pasted.item || system.Descrição,
+                Unidade: action.systemUnitDestino, 
+                Quantidade: 1, // FIXO: 1 (removido pasted.quantidade)
+                Localização: pasted.localizacao || pasted.local || system.Localização || '',
+                Estado: normalizeEstadoConservacao(pasted['estado de conservacao'] || pasted.estado || system.Estado),
+                'Origem da Doação': extractOrigemDoacao(pasted) || system['Origem da Doação'] || '',
+                Observação: pasted.observacao || pasted.obs || system.Observação || '[Atualizado via Substituição em Massa]',
+                Fornecedor: pasted.fornecedor || system.Fornecedor || '',
+                
+                updatedAt: serverT(),
+                etiquetaPendente: true 
+            };
+            batch.update(docRef, changes);
+        }
         // Ação UPDATE não deve ocorrer neste novo fluxo, mas se aparecer por algum bug, ignora a atualização.
     });
 
