@@ -513,13 +513,15 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 // Se foi ligado manualmente (no modal), a escolha já foi feita
                 const isManualLink = finalAction === 'update' && row.updateDescription !== undefined;
                 if(isManualLink) {
-                    // Se foi ligação manual, apenas mostre o resultado, mas não permita mudar.
+                    // SEÇÃO ALTERADA AQUI: Torna o status visualmente FIXO.
                     const finalDesc = row.updateDescription ? 'Planilha (Manual)' : 'Sistema (Manual)';
                     const finalClass = row.updateDescription ? 'text-blue-700' : 'text-yellow-700';
                     actionHtml = `
-                        <div class="p-3 bg-slate-100 rounded-lg">
-                           <p class="font-bold ${finalClass}">Ligação Manual: ${finalDesc}</p>
+                        <div class="p-3 bg-slate-200 border-l-4 border-slate-500 rounded-lg">
+                           <p class="text-xs font-semibold text-slate-700 mb-1">Status Fixo:</p>
+                           <p class="font-bold ${finalClass}">Manual: ${finalDesc}</p>
                            <input type="hidden" class="edit-by-desc-action" value="update" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                           <input type="hidden" class="manual-desc-choice" value="${row.updateDescription ? 'use_giap' : 'use_system'}">
                         </div>
                     `;
                 } else {
@@ -1121,11 +1123,25 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     let obs = bestMatch.Observação || '';
                     
                     // LÊ A ESCOLHA DE DESCRIÇÃO (REQUISITO 1)
+                    // Verifica se a escolha de descrição foi feita pelo select normal ou pelo campo hidden da Ligação Manual
+                    let descAction;
                     const descSelect = row.querySelector('.desc-choice-action');
-                    const descAction = descSelect ? descSelect.value : 'use_system'; 
-
-                    // Lógica de atualização
-                    // Tombamento é atualizado
+                    const manualChoice = row.querySelector('.manual-desc-choice');
+                    
+                    if (manualChoice) {
+                        descAction = manualChoice.value;
+                    } else if (descSelect) {
+                        descAction = descSelect.value;
+                    } else {
+                        descAction = 'use_system'; // Padrão de segurança
+                    }
+                    
+                    // Verifica se o item NO SISTEMA era S/T (melhor forma de identificar a Ligação Manual)
+                    const wasStItem = normalizeTombo(bestMatch.Tombamento) === 's/t' || !bestMatch.Tombamento;
+                    
+                    // LÓGICA DE ATUALIZAÇÃO:
+                    
+                    // 1. Campos base da Planilha (SEMPRE para ligar S/T ou corrigir Tombo)
                     changes.Tombamento = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
                     changes.Localização = pastedItem.local || pastedItem.localizacao || '';
                     changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
@@ -1134,32 +1150,29 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     changes.Fornecedor = pastedItem.fornecedor || '';
                     changes.NF = pastedItem.nf || '';
                     
-                    // Aplica a escolha de descrição (REQUISITO 1)
-                    const isManualLinkUpdate = (comparisonData[rowIndex]?.updateDescription === true);
-
-                    if (descAction === 'use_giap' || isManualLinkUpdate) {
+                    // 2. Aplica a escolha de descrição (REQUISITO 1)
+                    if (descAction === 'use_giap') {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
                     } else {
-                        // Mantém a descrição do sistema original
+                        // Mantém a descrição do sistema original (bestMatch.Descrição)
                         changes.Descrição = bestMatch.Descrição;
                     }
 
-                    const auditMsg = normalizeTombo(bestMatch.Tombamento) !== changes.Tombamento ? '[Tombo Corrigido e Atualizado]' : '[Atualizado via Importação]';
+                    const auditMsg = wasStItem ? '[Ligação S/T Manual Concluída]' : (normalizeTombo(bestMatch.Tombamento) !== changes.Tombamento ? '[Tombo Corrigido e Atualizado]' : '[Atualizado via Importação]');
                     changes.Observação = `${auditMsg} ` + (changes.Observação || obs);
                     
-                    // Garantir que o Tombamento NUNCA SEJA VAZIO e atualizar etiquetaPendente (REQUISITO 1)
+                    // 3. Garantir que o Tombamento NUNCA SEJA VAZIO e atualizar etiquetaPendente
                     if (!changes.Tombamento || normalizeTombo(changes.Tombamento) === 's/t') {
                         changes.Tombamento = bestMatch.Tombamento; 
                         showNotification(`Tombo do item ${bestMatch.id} não pôde ser atualizado (vazio). Mantido o original.`, 'warning', 5000);
+                        changes.etiquetaPendente = false;
                     } else {
-                         // Se o Tombo da Planilha for diferente, marca etiquetaPendente para revisão.
+                         // Se o Tombo mudou (inclusive de S/T para número), marca etiquetaPendente.
                          if (normalizeTombo(bestMatch.Tombamento) !== changes.Tombamento) {
                              changes.etiquetaPendente = true; 
                          } else {
-                             // Se o Tombo não mudou, mas era um item S/T ligado manualmente, remove a pendência.
-                             if (normalizeTombo(bestMatch.Tombamento) !== 's/t') {
-                                 changes.etiquetaPendente = false; 
-                             }
+                             // Se o Tombo não mudou, remove a pendência.
+                             changes.etiquetaPendente = false; 
                          }
                     }
 
