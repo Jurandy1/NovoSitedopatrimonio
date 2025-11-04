@@ -1,6 +1,8 @@
-/**// /src/edit.js
-// Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
-// Funciona como ORQUESTRADOR, carregando dados e delegando a lógica das abas.
+/**
+ * /src/edit.js
+ * Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
+ * Funciona como ORQUESTRADOR, carregando dados e delegando a lógica das abas.
+ */
 
 
 // --- IMPORTS DE SERVIÇOS E ESTADO ---
@@ -284,8 +286,29 @@ async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
  * Renderiza a tabela da Planilha GIAP (conteúdo da aba 'giap').
  */
 function renderGiapInventoryTable(giapInventory) {
-// ... (código inalterado)
-// ...
+    const container = document.getElementById('giap-table-body');
+    const headerRow = document.querySelector('#content-giap thead tr');
+    
+    if (!container || !headerRow) return;
+    
+    if (giapInventory.length === 0) {
+        headerRow.innerHTML = '';
+        container.innerHTML = '<tr><td colspan="1" class="text-center p-10 text-slate-500">Nenhum dado do GIAP disponível.</td></tr>';
+        return;
+    }
+
+    // Pega todos os cabeçalhos
+    const headers = Object.keys(giapInventory[0]);
+    headerRow.innerHTML = headers.map(h => `<th class="p-3 text-left font-semibold text-xs">${escapeHtml(h)}</th>`).join('');
+    
+    // Renderiza o corpo da tabela (limitando a 200 linhas para performance)
+    container.innerHTML = giapInventory.slice(0, 200).map(item => {
+        return `
+            <tr class="border-b border-slate-200 hover:bg-slate-50">
+                ${headers.map(header => `<td class="p-2 text-xs">${escapeHtml(item[header] || '')}</td>`).join('')}
+            </tr>
+        `;
+    }).join('');
 }
 
 
@@ -293,22 +316,269 @@ function renderGiapInventoryTable(giapInventory) {
 
 /**
  * Manipulador de clique para o botão "Atualizar do GIAP".
-// ... (código inalterado)
-// ...
+ */
+async function handleUpdateAllFromGiap() {
+    DOM.updateAllGiapModal.classList.remove('hidden');
+    DOM.updateAllLoading.classList.remove('hidden');
+    DOM.updateAllList.classList.add('hidden');
+    DOM.updateAllConfirmBtn.disabled = true;
+
+    const { patrimonioFullList, giapMapAllItems } = getState();
+
+    // 1. Encontra divergências
+    const itemsToReview = [];
+
+    // Filtra apenas itens tombados no sistema (ignora S/T e permuta)
+    const tombadosNoSistema = patrimonioFullList.filter(item => {
+        const tombo = normalizeTombo(item.Tombamento);
+        return tombo && !tombo.includes('permuta');
+    });
+
+    // A. Comparação: Sistema vs GIAP
+    tombadosNoSistema.forEach(systemItem => {
+        const tombo = normalizeTombo(systemItem.Tombamento);
+        const giapItem = giapMapAllItems.get(tombo);
+        
+        if (!giapItem) {
+            // Item no sistema mas não na planilha GIAP (possivelmente baixado ou erro)
+            itemsToReview.push({
+                type: 'not_found',
+                systemItem: systemItem,
+                giapItem: null
+            });
+            return;
+        }
+        
+        // Normaliza campos para comparação
+        const systemDesc = normalizeStr(systemItem.Descrição);
+        const giapDesc = normalizeStr(giapItem.Descrição || giapItem.Espécie);
+        const systemLocal = normalizeStr(systemItem.Localização);
+        const giapLocal = normalizeStr(giapItem.Localização);
+        const systemUnidade = normalizeStr(systemItem.Unidade);
+        const giapUnidade = normalizeStr(giapItem.Unidade);
+        const giapFornecedor = normalizeStr(giapItem['Nome Fornecedor']);
+        const systemFornecedor = normalizeStr(systemItem.Fornecedor);
+        const giapNF = normalizeStr(giapItem.NF);
+        const systemNF = normalizeStr(systemItem.NF);
+
+
+        // Verifica se há alguma divergência significativa (Desc, Local, Unidade, NF, Fornecedor)
+        const hasDivergence = 
+            systemDesc !== giapDesc || 
+            systemLocal !== giapLocal || 
+            systemUnidade !== giapUnidade ||
+            giapFornecedor !== systemFornecedor ||
+            giapNF !== systemNF;
+
+        if (hasDivergence) {
+            itemsToReview.push({
+                type: 'divergence',
+                systemItem: systemItem,
+                giapItem: giapItem,
+                divergences: {
+                    desc: systemDesc !== giapDesc,
+                    local: systemLocal !== giapLocal,
+                    unidade: systemUnidade !== giapUnidade,
+                    fornecedor: giapFornecedor !== systemFornecedor,
+                    nf: giapNF !== systemNF
+                }
+            });
+        }
+    });
+
+    // 2. Renderiza os resultados
+    renderUpdateAllList(itemsToReview);
+    DOM.updateAllLoading.classList.add('hidden');
+    DOM.updateAllList.classList.remove('hidden');
+    DOM.updateAllConfirmBtn.disabled = itemsToReview.length === 0;
+}
+
+/**
+ * Renderiza a lista de itens para revisão no modal "Atualizar do GIAP".
  * @param {Array<object>} itemsToReview - Itens para exibir no modal.
  */
 function renderUpdateAllList(itemsToReview) {
-// ... (código inalterado)
-// ...
-}
+    const listContainer = DOM.updateAllList;
+    listContainer.innerHTML = '';
 
+    if (itemsToReview.length === 0) {
+        listContainer.innerHTML = `<p class="p-4 text-slate-500 text-center">Nenhuma divergência ou item perdido encontrado.</p>`;
+        return;
+    }
+
+    let html = `
+        <div class="p-3 bg-slate-100 rounded-lg flex items-center gap-4 mb-4">
+             <label class="flex items-center font-medium">
+                <input type="checkbox" id="update-all-select-all" class="h-4 w-4 mr-2">
+                Selecionar Todos
+            </label>
+            <select id="update-all-bulk-action-select" class="p-2 border rounded-lg bg-white text-sm">
+                <option value="">-- Ação em Massa --</option>
+                <optgroup label="Divergências">
+                    <option value="update">Atualizar para GIAP</option>
+                    <option value="keep">Manter no Sistema</option>
+                </optgroup>
+                 <optgroup label="Não Encontrados">
+                    <option value="mark-for-check">Marcar p/ Checagem Manual</option>
+                </optgroup>
+            </select>
+            <button id="update-all-bulk-apply-btn" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">Aplicar</button>
+        </div>
+    `;
+
+    itemsToReview.forEach((item, index) => {
+        const { systemItem, giapItem, type } = item;
+        
+        let header, detailsHtml, bgColor, actionSelect;
+        
+        if (type === 'divergence') {
+            const { divergences } = item;
+            bgColor = 'bg-yellow-50 border-yellow-300';
+            header = `<span class="text-yellow-700 font-bold">⚠️ DIVERGÊNCIA ENCONTRADA</span> (Tombo: ${escapeHtml(systemItem.Tombamento)})`;
+            
+            const divergenceList = Object.keys(divergences).filter(k => divergences[k]).map(k => {
+                 let sysVal = systemItem[k] || systemItem[k.charAt(0).toUpperCase() + k.slice(1)] || 'N/D';
+                 let giapVal = giapItem[k] || giapItem[k.charAt(0).toUpperCase() + k.slice(1)] || 'N/D';
+                 if (k === 'desc') {
+                     sysVal = systemItem.Descrição;
+                     giapVal = giapItem.Descrição || giapItem.Espécie;
+                 }
+                 
+                 return `<li class="text-sm"><strong>${k.charAt(0).toUpperCase() + k.slice(1)}:</strong> Sistema: <span class="text-red-600 font-semibold">${escapeHtml(sysVal)}</span> ➔ GIAP: <span class="text-green-600 font-semibold">${escapeHtml(giapVal)}</span></li>`;
+            }).join('');
+            
+            detailsHtml = `
+                <p class="text-sm">O item existe em ambos, mas os dados não batem:</p>
+                <ul class="list-disc pl-5 mt-2 space-y-1">${divergenceList}</ul>
+            `;
+
+            actionSelect = `
+                <select class="update-choice w-full p-2 border rounded-lg bg-white" data-id="${systemItem.id}" data-type="divergence">
+                    <option value="update" selected>Atualizar para dados do GIAP</option>
+                    <option value="keep">Manter dados atuais do Sistema</option>
+                </select>
+            `;
+            
+        } else if (type === 'not_found') {
+            bgColor = 'bg-red-50 border-red-300';
+            header = `<span class="text-red-700 font-bold">❌ NÃO ENCONTRADO NO GIAP</span> (Tombo: ${escapeHtml(systemItem.Tombamento)})`;
+            
+            detailsHtml = `
+                <p class="text-sm">O Tombo **${escapeHtml(systemItem.Tombamento)}** existe no Sistema (**${escapeHtml(systemItem.Unidade)}**) mas não foi encontrado na Planilha GIAP.</p>
+                <p class="text-xs mt-2">Pode ter sido baixado, transferido para outra planilha ou é um erro de digitação no Tombo do sistema.</p>
+            `;
+
+            actionSelect = `
+                <select class="update-choice-notfound w-full p-2 border rounded-lg bg-white" data-id="${systemItem.id}" data-type="not_found">
+                    <option value="mark-for-check" selected>Marcar p/ Checagem Manual</option>
+                    <option value="ignore">Ignorar por enquanto</option>
+                </select>
+            `;
+        }
+
+        html += `
+            <div class="p-4 border-l-4 rounded-r-lg shadow-sm ${bgColor}">
+                <div class="flex items-start justify-between">
+                    <div>
+                        <h4 class="font-semibold">${header}</h4>
+                        <p class="text-xs text-slate-500">${escapeHtml(systemItem.Descrição)} (${escapeHtml(systemItem.Unidade)})</p>
+                    </div>
+                    <input type="checkbox" class="update-all-checkbox h-4 w-4 ml-4 mt-1" data-id="${systemItem.id}" checked>
+                </div>
+                <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div class="md:col-span-2">${detailsHtml}</div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Ação a ser Aplicada</label>
+                        ${actionSelect}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    listContainer.innerHTML = html;
+}
 
 /**
  * Manipulador de clique para o botão "Confirmar" do novo modal.
-// ... (código inalterado)
-// ...
-    // FIM DA ALTERAÇÃO
+ */
+async function handleUpdateAllConfirm() {
+    const listItems = DOM.updateAllList.querySelectorAll('.update-all-checkbox:checked');
+    if (listItems.length === 0) return showNotification('Selecione pelo menos um item para processar.', 'warning');
+    
+    showOverlay(`Processando ${listItems.length} ações de auditoria...`);
+    DOM.updateAllGiapModal.classList.add('hidden');
+    
+    const batch = writeBatch(db);
+    const { patrimonioFullList, giapMapAllItems } = getState();
+    let actionsCount = 0;
+    
+    listItems.forEach(checkbox => {
+        const id = checkbox.dataset.id;
+        const row = checkbox.closest('div[class*="border-l-4"]');
+        const select = row.querySelector('.update-choice, .update-choice-notfound');
+        const action = select ? select.value : 'ignore';
+        
+        const systemItem = patrimonioFullList.find(i => i.id === id);
+        if (!systemItem) return;
+        
+        const docRef = doc(db, 'patrimonio', id);
+        const tombo = normalizeTombo(systemItem.Tombamento);
+        const giapItem = giapMapAllItems.get(tombo);
+        
+        if (action === 'update' && giapItem) {
+            // Ação: Atualizar para dados do GIAP (Divergência)
+            const changes = {
+                Descrição: giapItem.Descrição || giapItem.Espécie,
+                Localização: giapItem.Localização || '',
+                Fornecedor: giapItem['Nome Fornecedor'] || '',
+                NF: giapItem.NF || '',
+                'Tipo Entrada': giapItem['Tipo Entrada'] || '',
+                Unidade_Planilha: giapItem['Unidade'] || '',
+                Observação: `[Auditoria: Atualizado p/ GIAP] ${systemItem.Observação || ''}`,
+                updatedAt: serverT()
+            };
+            batch.update(docRef, changes);
+            actionsCount++;
+        } else if (action === 'keep') {
+            // Ação: Manter dados atuais (Divergência)
+            const changes = {
+                Observação: `[Auditoria: Manter Sistema] ${systemItem.Observação || ''}`,
+                updatedAt: serverT()
+            };
+            batch.update(docRef, changes);
+            actionsCount++;
+        } else if (action === 'mark-for-check') {
+            // Ação: Marcar para checagem manual (Não encontrado)
+            const changes = {
+                // Adiciona uma nova flag para facilitar a filtragem na aba de edição
+                Auditoria_Status: 'Checagem Manual (Tombo Perdido)',
+                Observação: `[Auditoria: Tombo não encontrado no GIAP - Verificar] ${systemItem.Observação || ''}`,
+                updatedAt: serverT()
+            };
+            batch.update(docRef, changes);
+            actionsCount++;
+        }
+        // 'ignore' não faz nada no batch
+    });
+
+    if (actionsCount === 0) {
+        hideOverlay();
+        return showNotification('Nenhuma ação foi selecionada para salvar. Operação cancelada.', 'info');
+    }
+
+    try {
+        await batch.commit();
+        await idb.metadata.clear();
+        showNotification(`${actionsCount} ações de auditoria salvas! Recarregando...`, 'success');
+        loadData(true);
+    } catch (e) {
+        hideOverlay();
+        showNotification('Erro ao salvar ações de auditoria.', 'error');
+        console.error(e);
+    }
 }
+// FIM DA ALTERAÇÃO
 
 // --- LISTENERS E INICIALIZAÇÃO ---
 
