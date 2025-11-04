@@ -501,10 +501,13 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 const giapDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
 
                 const selectDescHtml = `
-                    <select class="desc-choice-action w-full p-2 border rounded-lg bg-white mt-1 text-sm" data-system-id="${bestMatch.id}" data-row-index="${index}">
-                        <option value="use_system">Manter Descrição do Sistema</option>
-                        <option value="use_giap" ${score < 1.0 ? 'selected' : ''}>Usar Descrição da Planilha</option>
-                    </select>
+                    <div class="mt-2">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Manter ou Alterar Descrição:</label>
+                        <select class="desc-choice-action w-full p-2 border border-blue-300 rounded-lg bg-blue-50 text-sm" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                            <option value="use_system">Manter: ${systemDesc}</option>
+                            <option value="use_giap" ${score < 1.0 ? 'selected' : ''}>Alterar: ${giapDesc}</option>
+                        </select>
+                    </div>
                 `;
                 
                 // Se foi ligado manualmente (no modal), a escolha já foi feita
@@ -514,16 +517,22 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     const finalDesc = row.updateDescription ? 'Planilha (Manual)' : 'Sistema (Manual)';
                     const finalClass = row.updateDescription ? 'text-blue-700' : 'text-yellow-700';
                     actionHtml = `
-                        <p class="font-bold ${finalClass}">Ligação Manual: ${finalDesc}</p>
-                        <input type="hidden" class="edit-by-desc-action" value="update" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                        <div class="p-3 bg-slate-100 rounded-lg">
+                           <p class="font-bold ${finalClass}">Ligação Manual: ${finalDesc}</p>
+                           <input type="hidden" class="edit-by-desc-action" value="update" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                        </div>
                     `;
                 } else {
+                    // ALTERAÇÃO: Adicionando classes visuais para o select de Ação Principal
                     actionHtml = `
-                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
-                            <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos</option>
-                            <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
-                        </select>
-                        ${selectDescHtml}
+                        <div class="space-y-3">
+                            <label class="block text-xs font-semibold text-slate-600">Ação Principal:</label>
+                            <select class="edit-by-desc-action w-full p-2 border border-green-500 rounded-lg bg-green-100 font-semibold" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                                <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos</option>
+                                <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
+                            </select>
+                            ${selectDescHtml}
+                        </div>
                     `;
                 }
 
@@ -533,13 +542,15 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
+                // ALTERAÇÃO: Adicionando classes visuais para o select de Criação/Ligação
                 actionHtml = `
-                    <div class="space-y-1">
-                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}" data-row-index="${index}">
+                    <div class="space-y-2">
+                        <label class="block text-xs font-semibold text-slate-600">Ação Principal (Não Encontrado):</label>
+                        <select class="edit-by-desc-action w-full p-2 border border-red-500 rounded-lg bg-red-100 font-semibold" data-system-id="new-item-${index}" data-row-index="${index}">
                             <option value="create_new" ${currentRenderAction === 'create_new' ? 'selected' : ''}>Criar Novo Item (Sobrando)</option>
                             <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar Linha</option>
                         </select>
-                        <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
+                        <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-2 rounded-lg text-sm hover:bg-yellow-600 font-bold mt-2">Ligar S/T Manualmente</button>
                     </div>
                 `;
             }
