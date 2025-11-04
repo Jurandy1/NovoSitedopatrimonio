@@ -110,6 +110,9 @@ const DOM_IMPORT = {
     editByDescBulkAction: document.getElementById('edit-by-desc-bulk-action'),
     editByDescBulkApply: document.getElementById('edit-by-desc-bulk-apply'),
     editByDescSummary: document.getElementById('edit-by-desc-summary'),
+    // INÍCIO DA ALTERAÇÃO: Novo Filtro de Ação
+    editByDescActionFilter: document.getElementById('edit-by-desc-action-filter'),
+    // FIM DA ALTERAÇÃO
     
     // Importar em Massa
     massTransferTombos: document.getElementById('mass-transfer-tombos'),
@@ -336,7 +339,8 @@ function processUnitMappingAndLoadItems() {
                 bestMatch: null, 
                 score: 0, 
                 systemUnitName, 
-                updateDescription: false
+                updateDescription: false,
+                initialAction: 'create_new' // Adiciona a ação inicial
             };
             multiUnitImportData.comparisonData.push(comparisonRow);
         } else if (match !== null) {
@@ -352,7 +356,8 @@ function processUnitMappingAndLoadItems() {
                 bestMatch: match, 
                 score, 
                 systemUnitName, 
-                updateDescription: false
+                updateDescription: false,
+                initialAction: 'update' // Adiciona a ação inicial
             };
             multiUnitImportData.comparisonData.push(comparisonRow);
         }
@@ -441,6 +446,10 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
     // (Req 1) Agrupa os dados por unidade do sistema
     const groupedByUnit = comparisonData.reduce((acc, row) => {
+        // *** NOVO: Adiciona a ação final baseada no initialAction (usada no filtro)
+        row.finalAction = row.finalAction || (row.bestMatch ? 'update' : 'create_new');
+        // *** FIM NOVO ***
+        
         const unitName = row.systemUnitName || 'Unidade Inválida';
         if (!acc[unitName]) {
             acc[unitName] = [];
@@ -449,16 +458,29 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         return acc;
     }, {});
 
+    const actionFilter = DOM_IMPORT.editByDescActionFilter.value;
     let html = '';
 
     // Itera sobre cada unidade agrupada
     Object.entries(groupedByUnit).forEach(([systemUnitName, items]) => {
         
+        // Filtra os itens por unidade antes de renderizar
+        const filteredItems = items.filter(row => {
+            if (actionFilter === 'all') return true;
+            if (actionFilter === 'manual') {
+                 // Ação manual é para itens que são "create_new" mas ainda não foram ligados manualmente
+                 return row.finalAction === 'create_new' && row.bestMatch === null;
+            }
+            return row.finalAction === actionFilter;
+        });
+
+        if (filteredItems.length === 0) return; // Se a unidade não tem itens com o filtro, não renderiza
+
         html += `
-            <details open class="unit-group-details mb-4 border rounded-lg shadow-sm bg-white">
+            <details open class="unit-group-details mb-4 border rounded-lg shadow-sm bg-white" data-unit-name="${escapeHtml(systemUnitName)}">
                 <summary class="p-3 font-bold text-lg bg-slate-100 cursor-pointer rounded-t-lg flex justify-between items-center hover:bg-slate-200">
                     <span>Unidade: ${escapeHtml(systemUnitName)}</span>
-                    <span class="text-sm font-normal bg-blue-100 text-blue-700 px-3 py-1 rounded-full">${items.length} itens</span>
+                    <span class="text-sm font-normal bg-blue-100 text-blue-700 px-3 py-1 rounded-full">${filteredItems.length} itens</span>
                 </summary>
                 <div class="p-2 overflow-x-auto">
                     <table class="w-full text-sm min-w-[900px]">
@@ -474,10 +496,10 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         `;
 
         // Itera sobre os itens *dentro* de cada unidade
-        items.forEach((row) => {
+        filteredItems.forEach((row) => {
             // Encontra o índice global do item para o data-row-index
             const index = comparisonData.indexOf(row);
-            const { pastedItem, bestMatch, score, systemUnitName } = row;
+            const { pastedItem, bestMatch, score, systemUnitName, finalAction } = row;
 
             // --- Dados da Planilha ---
             const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
@@ -519,7 +541,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 rowClass = 'bg-green-50';
                 
                 // MENSAGEM: Indica se foi por Tombo Exato ou Match Rígido (S/T)
-                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rígido (S/T)';
+                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rigoroso (S/T)';
                 const systemOrigem = bestMatch['Origem da Doação'] || 'N/D';
                 
                 systemHtml = `
@@ -531,9 +553,9 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Motivo: ${matchReason}</p>
                 `;
                 actionHtml = `
-                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}">
-                        <option value="update" selected>Atualizar Campos Marcados</option>
-                        <option value="ignore">Ignorar</option>
+                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                        <option value="update" ${finalAction === 'update' ? 'selected' : ''}>Atualizar Campos Marcados</option>
+                        <option value="ignore" ${finalAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
                     </select>
                 `;
             } else {
@@ -542,11 +564,14 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
+                // Ação Manual/Criar Novo
+                const isManual = (finalAction === 'create_new' && bestMatch === null); // O critério 'manual' é ser um item para criar novo.
+                
                 actionHtml = `
-                    <div class="space-y-1">
-                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}">
-                            <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
-                            <option value="ignore">Ignorar Linha</option>
+                    <div class="space-y-1" data-is-manual="${isManual}">
+                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}" data-row-index="${index}">
+                            <option value="create_new" ${finalAction === 'create_new' ? 'selected' : ''}>Criar Novo Item (Sobrando)</option>
+                            <option value="ignore" ${finalAction === 'ignore' ? 'selected' : ''}>Ignorar Linha</option>
                         </select>
                         <!-- BOTÃO DE LIGAÇÃO MANUAL -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
@@ -555,8 +580,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             }
 
             html += `
-                <tr class="border-b ${rowClass}" data-row-index="${index}">
-                    <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" checked></td>
+                <tr class="border-b ${rowClass}" data-row-index="${index}" data-action="${finalAction}">
+                    <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${finalAction !== 'ignore' ? 'checked' : ''}></td>
                     <td class="p-2 align-top">${planilhaHtml}</td>
                     <td class="p-2 align-top">${systemHtml}</td>
                     <td class="p-2 align-top">${actionHtml}</td>
@@ -571,6 +596,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
     // Atualiza o sumário
     updateEditByDescSummary();
+    // Re-adiciona listener para o filtro de ação
+    DOM_IMPORT.editByDescActionFilter.addEventListener('change', debounce(() => renderEditByDescPreview(comparisonData, fieldUpdates), 50));
 }
 // FIM DA ALTERAÇÃO
 
@@ -580,22 +607,46 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 // INÍCIO DA ALTERAÇÃO: Lógica de contagem atualizada (Req 2)
 function updateEditByDescSummary() {
     const selects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
-    const notFoundButtons = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('button.link-manual-btn');
     
     let toUpdateCount = 0;
     let toIgnoreCount = 0;
     let toCreateCount = 0;
-    let notFoundCount = notFoundButtons.length; // Conta os botões "Não Encontrado" (que precisam de ação manual)
+    let manualCount = 0;
 
-    selects.forEach(select => {
-        if (select.value === 'update') toUpdateCount++;
-        else if (select.value === 'ignore') toIgnoreCount++;
-        else if (select.value === 'create_new') toCreateCount++;
+    // O sumário agora se baseia no `finalAction` que está armazenado no `comparisonData`
+    multiUnitImportData.comparisonData.forEach(row => {
+        if (row.finalAction === 'update') toUpdateCount++;
+        else if (row.finalAction === 'ignore') toIgnoreCount++;
+        else if (row.finalAction === 'create_new' && row.bestMatch === null) manualCount++; // Manual é um "criar novo" que ainda não foi ligado
+        else if (row.finalAction === 'create_new' && row.bestMatch !== null) toCreateCount++; // Se tiver bestMatch (ligado manualmente), é um "criar novo" que virou "atualizar"
     });
+    
+    // Recalcula o count para o sumário, baseado nas ações atuais do select na UI
+    let uiUpdateCount = 0;
+    let uiCreateCount = 0;
+    let uiIgnoreCount = 0;
+    let uiManualCount = 0;
+    
+    DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr[data-row-index]').forEach(rowEl => {
+        const select = rowEl.querySelector('select.edit-by-desc-action');
+        const action = select ? select.value : null;
+        const rowIndex = parseInt(rowEl.dataset.rowIndex, 10);
+        const isManual = !multiUnitImportData.comparisonData[rowIndex].bestMatch; // Se ainda não tem bestMatch (e é create_new)
 
-    DOM_IMPORT.editByDescSummary.textContent = `${toUpdateCount} para ATUALIZAR, ${toIgnoreCount} para IGNORAR, ${toCreateCount} para CRIAR, ${notFoundCount} MANUAIS.`;
+        if (action === 'update') uiUpdateCount++;
+        else if (action === 'ignore') uiIgnoreCount++;
+        else if (action === 'create_new') {
+            if (isManual) uiManualCount++;
+            else uiCreateCount++;
+        }
+    });
+    
+    // Usa o count da UI para o texto, mas a lógica de confirmação usa o estado final no `comparisonData`
+    DOM_IMPORT.editByDescSummary.textContent = 
+        `${uiUpdateCount} para ATUALIZAR, ${uiCreateCount} para CRIAR, ${uiIgnoreCount} para IGNORAR, ${uiManualCount} MANUAIS.`;
+    
     // O botão só fica desabilitado se a soma das ações não for maior que zero
-    DOM_IMPORT.confirmEditByDescBtn.disabled = (toUpdateCount + toCreateCount) === 0;
+    DOM_IMPORT.confirmEditByDescBtn.disabled = (uiUpdateCount + uiCreateCount + uiManualCount) === 0;
 }
 // FIM DA ALTERAÇÃO
 
@@ -741,6 +792,9 @@ function confirmManualLink() {
     comparisonRow.bestMatch = systemItem;
     comparisonRow.score = 1.0; // 1.0 para indicar override manual
     comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha
+    
+    // Define a ação final como "update", pois é uma ligação de S/T para Tombo
+    comparisonRow.finalAction = 'update';
 
     // Fecha o modal
     DOM_IMPORT.manualLinkModal.classList.add('hidden');
@@ -1129,8 +1183,8 @@ export function setupImportacaoListeners(reloadDataCallback) {
         DOM_IMPORT.editByDescSelectAll.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
             // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
-            DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:not(:disabled)').forEach(cb => {
-                cb.checked = isChecked;
+            DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox').forEach(cb => {
+                 cb.checked = isChecked;
             });
             // FIM DA ALTERAÇÃO
         });
@@ -1141,16 +1195,26 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const action = DOM_IMPORT.editByDescBulkAction.value;
             if (!action) return showNotification('Selecione uma ação em massa.', 'warning');
 
-            // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
-            const checkedRows = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('.edit-by-desc-row-checkbox:checked');
+            // INÍCIO DA ALTERAÇÃO: O seletor agora busca apenas linhas VISÍVEIS
+            const checkedRows = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox:checked');
             // FIM DA ALTERAÇÃO
             if (checkedRows.length === 0) return showNotification('Nenhum item selecionado.', 'warning');
 
             checkedRows.forEach(cb => {
                 const row = cb.closest('tr');
                 const select = row.querySelector('.edit-by-desc-action');
-                if (select && !select.disabled) {
+                if (select) {
                     select.value = action;
+                    
+                    // Atualiza o estado da ação final no comparisonData
+                    const rowIndex = parseInt(row.dataset.rowIndex, 10);
+                    if (rowIndex > -1 && multiUnitImportData.comparisonData[rowIndex]) {
+                         multiUnitImportData.comparisonData[rowIndex].finalAction = action;
+                         row.dataset.action = action; // Atualiza o atributo da linha para o filtro
+                    }
+                    
+                    // Ajusta o checkbox
+                    cb.checked = (action !== 'ignore');
                 }
             });
             updateEditByDescSummary(); // Atualiza a contagem
@@ -1164,15 +1228,43 @@ export function setupImportacaoListeners(reloadDataCallback) {
         if (e.target.classList.contains('edit-by-desc-unit-select-all')) {
             const isChecked = e.target.checked;
             const tableBody = e.target.closest('table').querySelector('tbody');
-            tableBody.querySelectorAll('.edit-by-desc-row-checkbox:not(:disabled)').forEach(cb => {
+            // Filtra por linhas VISÍVEIS (não filtradas pelo filtro de ação)
+            tableBody.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox').forEach(cb => {
                 cb.checked = isChecked;
             });
         }
         
         if (e.target.classList.contains('edit-by-desc-action')) {
+            const select = e.target;
+            const action = select.value;
+            const rowEl = select.closest('tr');
+            const rowIndex = parseInt(rowEl.dataset.rowIndex, 10);
+            const rowCheckbox = rowEl.querySelector('.edit-by-desc-row-checkbox');
+
+            // Atualiza o estado da ação final no comparisonData
+            if (rowIndex > -1 && multiUnitImportData.comparisonData[rowIndex]) {
+                 multiUnitImportData.comparisonData[rowIndex].finalAction = action;
+                 rowEl.dataset.action = action; // Atualiza o atributo da linha para o filtro
+            }
+
+            // Ajusta o checkbox e o sumário
+            rowCheckbox.checked = (action !== 'ignore');
             updateEditByDescSummary();
         }
     });
+    
+    // INÍCIO DA ALTERAÇÃO: Adiciona listener para o filtro de ação
+    if (DOM_IMPORT.editByDescActionFilter) {
+        DOM_IMPORT.editByDescActionFilter.addEventListener('change', () => {
+             // Quando o filtro de ação muda, re-renderizamos (ou chamamos uma função de filtro se o dataset for grande)
+             // Já que renderEditByDescPreview chama a si mesma com o filtro aplicado, basta re-renderizar
+             if (multiUnitImportData.comparisonData.length > 0) {
+                 renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+             }
+        });
+    }
+    // FIM DA ALTERAÇÃO
+
 
     // INÍCIO DA ALTERAÇÃO: (Req 2) Listener para o novo botão "Ligar Manualmente"
     DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('click', (e) => {
@@ -1206,6 +1298,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const row = select.closest('tr');
             const rowCheckbox = row.querySelector('.edit-by-desc-row-checkbox');
             const action = select.value;
+            const rowIndex = parseInt(row.dataset.rowIndex, 10);
             
             // --- NOVO CHECK DE SEGURANÇA CRÍTICO (CORREÇÃO DA TRAGÉDIA) ---
             // Ação só é processada se o SELECT não for 'ignore' E o CHECKBOX da linha estiver marcado.
@@ -1215,7 +1308,6 @@ export function setupImportacaoListeners(reloadDataCallback) {
             // -----------------------------------------------------------------
 
             const systemId = select.dataset.systemId;
-            const rowIndex = parseInt(row.dataset.rowIndex, 10);
             const { pastedItem, bestMatch, updateDescription, systemUnitName } = comparisonData[rowIndex];
 
             if (action === 'create_new') {
