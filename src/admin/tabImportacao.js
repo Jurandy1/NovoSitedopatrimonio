@@ -237,14 +237,13 @@ function processAndLoadItems() {
         
         // --- FILTRO DE SAÍDA RÍGIDO (REQUISITO) ---
         
-        // Se deu match exato (Tombo == Tombo), DESCARTA (REGRA DO USUÁRIO)
+        // Se deu match Tombo Exato E Limpo (sem divergência), DESCARTA (REGRA DO USUÁRIO - REQUISITO 3)
         if (reason === 'Tombo Exato - Limpo') {
             return;
         }
 
         if (match === null && reason.includes('Tombo Não Encontrado no Sistema')) {
              // Caso Sobrando (Vermelho) - Permite passar para ação de criação
-             // Se o Tombo da planilha não está no sistema, listamos para CRIAR NOVO
              const comparisonRow = { 
                 pastedItem, 
                 bestMatch: null, 
@@ -286,6 +285,8 @@ function processAndLoadItems() {
 
 /**
  * Encontra a melhor correspondência para a planilha: Tombo Exato OU Match Rígido (S/T).
+ *
+ * REQUISITO 2 (MELHORIA DO ALGORITMO): Garantir que Tombo Exato com divergência apareça.
  */
 function findBestMatch(pastedItem, itemsPool) {
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
@@ -298,17 +299,38 @@ function findBestMatch(pastedItem, itemsPool) {
     if (pastedTombo) { 
         const exactTomboMatch = itemsPool.find(item => normalizeTombo(item.Tombamento) === pastedTombo);
         if (exactTomboMatch) {
-            // Se o item JÁ TIVER O MESMO TOMBO, DESCARTAR para não poluir a lista. (REGRA DO USUÁRIO)
-            if (normalizeStr(exactTomboMatch.Descrição) === normalizeStr(pastedItem.descricao || pastedItem.item || '')) {
+            
+            // Define se há divergência nos metadados (Descrição, Local, Estado, NF, Fornecedor)
+            const systemDesc = normalizeStr(exactTomboMatch.Descrição);
+            const giapDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
+            const systemLocal = normalizeStr(exactTomboMatch.Localização);
+            const giapLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
+            const systemEstado = normalizeEstadoConservacao(exactTomboMatch.Estado);
+            const giapEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
+            // Adicionando checagem de Fornecedor e NF para rigidez na divergência
+            const systemFornecedor = normalizeStr(exactTomboMatch.Fornecedor);
+            const giapFornecedor = normalizeStr(pastedItem.fornecedor || '');
+            const systemNF = normalizeStr(exactTomboMatch.nf || '');
+            const giapNF = normalizeStr(pastedItem.nf || '');
+
+            const hasSignificantDivergence = 
+                systemDesc !== giapDesc || 
+                systemLocal !== giapLocal || 
+                systemEstado !== giapEstado ||
+                systemFornecedor !== giapFornecedor ||
+                systemNF !== giapNF;
+            
+            if (!hasSignificantDivergence) {
+                 // REQUISITO 3: Tombo Exato, Sem Divergência: DESCARTA (Limpo)
                  return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato - Limpo' };
             }
-            // Se achou pelo Tombo, mas a descrição é diferente, o match é 1.0 (Atualização de metadados/descrição)
-            return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato' };
+            
+            // REQUISITO 1: Tombo Exato, COM Divergência: APRESENTA PARA REVISÃO
+            return { match: exactTomboMatch, score: 1.0, reason: 'Tombo Exato - Divergência' };
         }
     }
     
     // --- NOVO PASSO: BUSCA POR MATCH RÍGIDO em CANDIDATOS S/T ---
-    // Isto ocorre APENAS se o Tombo da Planilha NÃO foi encontrado no sistema (que é o caso atual, pois a Busca 1 falhou).
 
     // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
     const stCandidates = itemsPool.filter(item => {
@@ -318,34 +340,53 @@ function findBestMatch(pastedItem, itemsPool) {
     });
 
     // 2. Match: Rígido (Local + Estado + Nome Similar) em CANDIDATOS S/T
+    let bestStMatch = null;
+    let maxStScore = 0;
+    
+    // REQUISITO 2 (MELHORIA): Iterar todos os S/T e escolher o de maior score com peso em Local/Estado.
     for (const systemItem of stCandidates) {
         const systemDesc = normalizeStr(systemItem.Descrição);
         const systemLocal = normalizeStr(systemItem.Localização);
         const systemEstado = normalizeEstadoConservacao(systemItem.Estado);
         
-        // Requisito: Local e Estado devem ser EXATOS (RIGOROSO)
-        if (systemLocal !== pastedLocal || systemEstado !== pastedEstado) {
-            continue; 
+        // Peso de 0.5 para similaridade de nome
+        const nameScore = calculateSimilarity(pastedDesc, systemDesc) * 0.5;
+        let finalScore = nameScore;
+
+        // Bônus rigoroso para Localização
+        if (systemLocal === pastedLocal && systemLocal.length > 2) {
+            finalScore += 0.3; // Grande bônus (30%) se o local for exato
+        } else if (systemLocal.includes(pastedLocal) || pastedLocal.includes(systemLocal)) {
+             finalScore += 0.15; // Bônus médio (15%) se o local contiver
+        }
+        
+        // Bônus para Estado
+        if (systemEstado === pastedEstado) {
+            finalScore += 0.15; // Bônus (15%) se o estado for exato
         }
 
-        // Requisito: Nome QUASE IGUAL (similaridade alta > 0.9)
-        const nameScore = calculateSimilarity(pastedDesc, systemDesc);
-        if (nameScore > 0.9) { 
-            // Match encontrado! Este item S/T será atualizado com o Tombo da planilha.
-            return { match: systemItem, score: 0.95, reason: 'Match Rigoroso em S/T' }; 
+        // Se o score final for alto o suficiente (> 0.95), consideramos match forte
+        if (finalScore >= 0.95) {
+             if (finalScore > maxStScore) {
+                 maxStScore = finalScore;
+                 bestStMatch = systemItem;
+             }
         }
     }
     
+    if (bestStMatch) {
+         return { match: bestStMatch, score: maxStScore, reason: 'Match Forte em S/T' };
+    }
+
     // --- 3. Falha: Sobrando ---
-    // Se não achou por Tombo Exato E não achou por Match Rígido em S/T.
     return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
 
 
 /**
  * Renderiza a tabela de comparação para "Importar e Atualizar Unidade".
- * @param {Array<object>} comparisonData - Dados processados da comparação.
- * @param {object} fieldUpdates - Objeto {Tombamento: true, ...}
+ *
+ * REQUISITO 1: Inclui select para escolha de descrição.
  */
 function renderEditByDescPreview(comparisonData, fieldUpdates) {
     const container = DOM_IMPORT.editByDescPreviewTableContainer;
@@ -371,8 +412,12 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         
         // Filtra os itens por unidade antes de renderizar
         const filteredItems = items.filter(row => {
-            const currentAction = row.bestMatch && row.finalAction === 'create_new' ? 'update' : row.finalAction;
-
+            // Lógica de filtro para a UI
+            let currentAction = row.finalAction || (row.bestMatch ? 'update' : 'create_new');
+            // Se for Tombo Exato - Limpo (já filtrado na fonte), não deve aparecer aqui.
+            // Se for Tombo Exato - Divergência, a ação deve ser 'update'.
+            if (row.bestMatch && row.score === 1.0 && row.reason === 'Tombo Exato - Divergência') currentAction = 'update'; 
+            
             if (actionFilter === 'all') return true;
             
             if (actionFilter === 'manual') {
@@ -382,9 +427,9 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             return currentAction === actionFilter;
         });
 
-        if (filteredItems.length === 0) return; // Se a unidade não tem itens com o filtro, não renderiza
+        if (filteredItems.length === 0) return; 
 
-        // Remove a 'details' e 'summary' pois agora é só uma unidade
+        // Adiciona cabeçalho da tabela
         html += `
                 <div class="p-2 overflow-x-auto">
                     <table class="w-full text-sm min-w-[900px]">
@@ -393,7 +438,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                                 <th class="p-2 text-left w-10"><input type="checkbox" class="h-4 w-4 edit-by-desc-unit-select-all" title="Selecionar todos nesta unidade"></th>
                                 <th class="p-2 text-left">Sua Planilha (Item Colado)</th>
                                 <th class="p-2 text-left">Sistema (Item Encontrado)</th>
-                                <th class="p-2 text-left w-48">Ação</th>
+                                <th class="p-2 text-left w-64">Ação</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -403,41 +448,28 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         filteredItems.forEach((row) => {
             const index = comparisonData.indexOf(row);
             const { pastedItem, bestMatch, score, systemUnitName, finalAction } = row;
-            const currentRenderAction = bestMatch ? 'update' : finalAction;
+            
+            // Determina a ação que será exibida (prioriza finalAction se setado)
+            const currentRenderAction = finalAction || (bestMatch ? 'update' : 'create_new');
 
             // --- Dados da Planilha ---
             const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
             const pastedTombo = escapeHtml(pastedItem.tombamento || pastedItem.tombo || 'S/T');
-            const pastedLocal = escapeHtml(pastedItem.local || pastedItem.localizacao || 'N/I');
+            const pastedLocalInput = pastedItem.local || pastedItem.localizacao || '';
             const pastedEstadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
             const { estado: pastedEstado, origem: pastedOrigem } = parseEstadoEOrigem(pastedEstadoInput);
             const pastedObs = escapeHtml(pastedItem.observacao || pastedItem.obs || '');
-
-            // Define quais campos serão atualizados (agora hardcoded para o fluxo desejado)
-            const fieldsToUpdate = {
-                Descrição: true,
-                Tombamento: true,
-                Localização: true,
-                Estado: true,
-                Observação: true,
-                Origem: true // Origem da Doação
-            };
-
-            const descHtml = fieldsToUpdate.Descrição ? `<span class="text-red-600 font-bold">${pastedDesc} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedDesc} (IGNORAR)</span>`;
-            const tomboHtml = fieldsToUpdate.Tombamento ? `<span class="text-red-600 font-bold">${pastedTombo} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedTombo} (IGNORAR)</span>`;
-            const localHtml = fieldsToUpdate.Localização ? `<span class="text-red-600 font-bold">${pastedLocal} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedLocal} (IGNORAR)</span>`;
-            const estadoHtml = fieldsToUpdate.Estado ? `<span class="text-red-600 font-bold">${pastedEstado} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedEstado} (IGNORAR)</span>`;
-            const obsHtml = fieldsToUpdate.Observação ? `<span class="text-red-600 font-bold">${pastedObs || '...'} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedObs || '...'} (IGNORAR)</span>`;
-            const origemHtml = fieldsToUpdate.Origem ? `<p><strong>Origem (Auto):</strong> <span class="text-red-600 font-bold">${escapeHtml(pastedOrigem || 'N/D')} (ATUALIZAR)</span></p>` : `<p><strong>Origem (Auto):</strong> <span class="text-slate-500">${escapeHtml(pastedOrigem || 'N/D')} (IGNORAR)</span></p>`;
-
-
+            
+            // --- Campos a serem ATUALIZADOS pela Planilha (highlight) ---
+            const tomboHtml = `<span class="text-red-600 font-bold">${pastedTombo}</span>`;
+            
+            // Conteúdo da Planilha (sempre em vermelho para destacar o que será copiado)
             let planilhaHtml = `
-                <p class="font-semibold">${descHtml}</p>
+                <p class="font-semibold text-red-600">${pastedDesc}</p>
                 <p><strong>Tombo:</strong> ${tomboHtml}</p>
-                <p><strong>Local:</strong> ${localHtml}</p>
-                <p><strong>Estado:</strong> ${estadoHtml}</p>
-                ${origemHtml}
-                <p><strong>Obs:</strong> ${obsHtml}</p>
+                <p><strong>Local:</strong> <span class="text-red-600 font-bold">${escapeHtml(pastedLocalInput || 'N/I')}</span></p>
+                <p><strong>Estado:</strong> <span class="text-red-600 font-bold">${escapeHtml(pastedEstado)}</span></p>
+                <p><strong>Origem:</strong> <span class="text-red-600 font-bold">${escapeHtml(pastedOrigem || 'N/D')}</span></p>
                 <p class="text-xs text-blue-600 mt-1">Planilha: ${escapeHtml(pastedItem.unidade)}</p>
             `;
 
@@ -449,10 +481,10 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
 
             if (bestMatch) {
-                // Correspondência Forte (Verde - Score 1.0 ou 0.95)
+                // Correspondência Forte (Verde)
                 rowClass = 'bg-green-50';
                 
-                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rigoroso (S/T)';
+                const matchReason = score >= 1.0 ? 'Tombo Exato (Divergência)' : `Match S/T (Score: ${score.toFixed(2)})`;
                 const systemOrigem = bestMatch['Origem da Doação'] || 'N/D';
                 
                 systemHtml = `
@@ -463,12 +495,38 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                     <p><strong>Origem Atual:</strong> <span class="text-slate-700 font-medium">${escapeHtml(systemOrigem)}</span></p>
                     <p class="text-xs text-slate-500 mt-1">ID: ${bestMatch.id} | Motivo: ${matchReason}</p>
                 `;
-                actionHtml = `
-                    <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
-                        <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos</option>
-                        <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
+                
+                // REQUISITO 1: Adicionar select de escolha de descrição para itens que serão atualizados
+                const systemDesc = escapeHtml(bestMatch.Descrição);
+                const giapDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
+
+                const selectDescHtml = `
+                    <select class="desc-choice-action w-full p-2 border rounded-lg bg-white mt-1 text-sm" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                        <option value="use_system">Manter Descrição do Sistema</option>
+                        <option value="use_giap" ${score < 1.0 ? 'selected' : ''}>Usar Descrição da Planilha</option>
                     </select>
                 `;
+                
+                // Se foi ligado manualmente (no modal), a escolha já foi feita
+                const isManualLink = finalAction === 'update' && row.updateDescription !== undefined;
+                if(isManualLink) {
+                    // Se foi ligação manual, apenas mostre o resultado, mas não permita mudar.
+                    const finalDesc = row.updateDescription ? 'Planilha (Manual)' : 'Sistema (Manual)';
+                    const finalClass = row.updateDescription ? 'text-blue-700' : 'text-yellow-700';
+                    actionHtml = `
+                        <p class="font-bold ${finalClass}">Ligação Manual: ${finalDesc}</p>
+                        <input type="hidden" class="edit-by-desc-action" value="update" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                    `;
+                } else {
+                    actionHtml = `
+                        <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
+                            <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos</option>
+                            <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
+                        </select>
+                        ${selectDescHtml}
+                    `;
+                }
+
             } else {
                 // Não Encontrado (Vermelho) - Item Sobrando (Tombo não existe no sistema)
                 rowClass = 'bg-red-50';
@@ -590,13 +648,23 @@ function openManualLinkModal(rowIndex) {
 
     const candidatesWithScore = systemItems.map(item => {
         const systemDesc = normalizeStr(item.Descrição);
-        const score = calculateSimilarity(pastedDesc, systemDesc);
+        // REQUISITO 2: Usar a nova lógica de similaridade que favorece Local/Estado
+        // Simulando o cálculo de findBestMatch para ranqueamento
+        const systemLocal = normalizeStr(item.Localização);
+        const systemEstado = normalizeEstadoConservacao(item.Estado);
         
-        if (score < 0.3) return null; 
+        const nameScore = calculateSimilarity(pastedDesc, systemDesc) * 0.5;
+        let finalScore = nameScore;
+
+        if (systemLocal === pastedLocal && systemLocal.length > 2) finalScore += 0.3;
+        else if (systemLocal.includes(pastedLocal) || pastedLocal.includes(systemLocal)) finalScore += 0.15;
+        if (systemEstado === pastedEstado) finalScore += 0.15;
+        
+        if (finalScore < 0.3) return null; 
 
         return {
             item,
-            score
+            score: finalScore
         };
     }).filter(c => c !== null); // Remove os itens com score muito baixo
 
@@ -630,7 +698,7 @@ function openManualLinkModal(rowIndex) {
         } else if (pastedLocal && !locationMatch) {
              filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> A lista está vazia (Filtro Rígido).`;
         } else {
-             filterMessage.innerHTML = `Localização da planilha não especificada. Listando todos os ${candidatesWithScore.length} itens S/T com similaridade de nome (> 0.3).`;
+             filterMessage.innerHTML = `Localização da planilha não especificada. Listando todos os ${candidatesWithScore.length} itens S/T com similaridade de nome e bônus por Local/Estado.`;
         }
     }
 
@@ -670,9 +738,11 @@ function confirmManualLink() {
 
     // Atualiza a linha de comparação em memória
     const comparisonRow = importData.comparisonData[selPastedItemIndex];
+    
+    // ATUALIZAÇÃO: Seta bestMatch para a linha de "Não Encontrado" e define a ação final como update
     comparisonRow.bestMatch = systemItem;
     comparisonRow.score = 1.0; // 1.0 para indicar override manual
-    comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha
+    comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha (REQUISITO 1)
     comparisonRow.finalAction = 'update';
 
     // Fecha o modal
@@ -717,6 +787,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
         const itemsToCreate = [];
 
         tombos.forEach(tombo => {
+            // Verifica se o Tombo já existe no inventário GERAL
             if (existingTombos.has(tombo)) {
                 return showNotification(`Tombo ${tombo} já existe no inventário.`, 'warning');
             }
@@ -783,6 +854,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 Fornecedor: giapItem['Nome Fornecedor'] || '', NF: giapItem.NF || '', 'Origem da Doação': '',
                 Estado: status, Quantidade: 1, Observação: `Importado em massa do GIAP.`,
                 isPermuta: false,
+                etiquetaPendente: true, // Novos itens criados com tombo da planilha devem ter etiqueta pendente
                 createdAt: serverT(), updatedAt: serverT()
             };
             batch.set(newItemRef, newItem);
@@ -874,10 +946,6 @@ export function setupImportacaoListeners(reloadDataCallback) {
         // Força a unidade de destino em todos os itens colados
         importData.pasted = parsed.map(item => ({ ...item, unidade: selectedSystemUnit }));
         
-        // Esconde o botão de pré-visualização e o formulário
-        // DOM_IMPORT.previewEditByDescBtn.classList.add('hidden');
-        // DOM_IMPORT.editByDescData.disabled = true;
-
         // Processa e renderiza a tabela de comparação
         processAndLoadItems();
     });
@@ -945,6 +1013,11 @@ export function setupImportacaoListeners(reloadDataCallback) {
             rowCheckbox.checked = (action !== 'ignore');
             updateEditByDescSummary();
         }
+        
+        // Listener para a escolha de descrição (REQUISITO 1)
+        if (e.target.classList.contains('desc-choice-action')) {
+            // Não precisa de lógica aqui, o valor será lido no botão de Confirmação
+        }
     });
     
     // Listener para o filtro de ação (Mantido)
@@ -974,12 +1047,12 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // ETAPA 2: Clique em "Confirmar e Atualizar Itens" (Mantido, mas lógica de campos atualizada)
+    // ETAPA 2: Clique em "Confirmar e Atualizar Itens"
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
         const itemsToUpdate = [];
         const itemsToCreate = [];
-        const { fieldUpdates, comparisonData } = importData;
+        const { comparisonData } = importData;
         let updateCount = 0; 
 
         actionSelects.forEach(select => {
@@ -993,7 +1066,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
             }
 
             const systemId = select.dataset.systemId;
-            const { pastedItem, bestMatch, updateDescription } = comparisonData[rowIndex];
+            const { pastedItem, bestMatch } = comparisonData[rowIndex];
             const systemUnitName = importData.selectedUnitName; // Pega a unidade selecionada
 
             if (action === 'create_new') {
@@ -1017,13 +1090,14 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     Tipo: itemType,
                     Unidade: systemUnitName, 
                     Localização: pastedItem.local || pastedItem.localizacao || '',
-                    Fornecedor: '', 
-                    NF: '', 
+                    Fornecedor: pastedItem.fornecedor || '', 
+                    NF: pastedItem.nf || '', 
                     'Origem da Doação': origemDoacao,
                     Estado: estadoNormalizado,
                     Quantidade: 1, 
                     Observação: `[Criado via Importação - Sobrando]. Tombo: ${pastedTombo}.`,
                     isPermuta: false,
+                    etiquetaPendente: true, // Novo item com tombo da planilha deve ter etiqueta pendente
                     createdAt: serverT(), 
                     updatedAt: serverT()
                 };
@@ -1035,20 +1109,48 @@ export function setupImportacaoListeners(reloadDataCallback) {
                     const changes = { updatedAt: serverT() };
                     let obs = bestMatch.Observação || '';
                     
-                    // Lógica de atualização simplificada: atualiza tudo
-                    changes.Tombamento = pastedItem.tombamento || pastedItem.tombo;
+                    // LÊ A ESCOLHA DE DESCRIÇÃO (REQUISITO 1)
+                    const descSelect = row.querySelector('.desc-choice-action');
+                    const descAction = descSelect ? descSelect.value : 'use_system'; 
+
+                    // Lógica de atualização
+                    // Tombamento é atualizado
+                    changes.Tombamento = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
                     changes.Localização = pastedItem.local || pastedItem.localizacao || '';
                     changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
                     changes['Origem da Doação'] = extractOrigemDoacao(pastedItem);
                     changes.Observação = pastedItem.observacao || pastedItem.obs || '';
+                    changes.Fornecedor = pastedItem.fornecedor || '';
+                    changes.NF = pastedItem.nf || '';
                     
-                    // Se foi ligado manualmente E o usuário marcou a caixa, atualiza a descrição
-                    if (updateDescription) {
+                    // Aplica a escolha de descrição (REQUISITO 1)
+                    const isManualLinkUpdate = (comparisonData[rowIndex]?.updateDescription === true);
+
+                    if (descAction === 'use_giap' || isManualLinkUpdate) {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
+                    } else {
+                        // Mantém a descrição do sistema original
+                        changes.Descrição = bestMatch.Descrição;
                     }
-                    
-                    const auditMsg = bestMatch.Tombamento !== changes.Tombamento ? '[Tombo Corrigido e Atualizado]' : '[Atualizado via Importação]';
+
+                    const auditMsg = normalizeTombo(bestMatch.Tombamento) !== changes.Tombamento ? '[Tombo Corrigido e Atualizado]' : '[Atualizado via Importação]';
                     changes.Observação = `${auditMsg} ` + (changes.Observação || obs);
+                    
+                    // Garantir que o Tombamento NUNCA SEJA VAZIO e atualizar etiquetaPendente (REQUISITO 1)
+                    if (!changes.Tombamento || normalizeTombo(changes.Tombamento) === 's/t') {
+                        changes.Tombamento = bestMatch.Tombamento; 
+                        showNotification(`Tombo do item ${bestMatch.id} não pôde ser atualizado (vazio). Mantido o original.`, 'warning', 5000);
+                    } else {
+                         // Se o Tombo da Planilha for diferente, marca etiquetaPendente para revisão.
+                         if (normalizeTombo(bestMatch.Tombamento) !== changes.Tombamento) {
+                             changes.etiquetaPendente = true; 
+                         } else {
+                             // Se o Tombo não mudou, mas era um item S/T ligado manualmente, remove a pendência.
+                             if (normalizeTombo(bestMatch.Tombamento) !== 's/t') {
+                                 changes.etiquetaPendente = false; 
+                             }
+                         }
+                    }
 
                     itemsToUpdate.push({
                         id: systemId,
