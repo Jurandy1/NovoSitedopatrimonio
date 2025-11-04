@@ -392,12 +392,14 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                 }
             }
 
-            // 7. Prossiga com a sincronização (agora com o item salvo e atualizado)
-            // openSyncModalCallback(item); // <-- REMOVIDO (Não abre mais o modal por padrão)
-
             // INÍCIO DA NOVA LÓGICA DE SINCRONIZAÇÃO DIRETA
+
+            // --- CORREÇÃO DE BUG: Lê o Tombo diretamente do campo de input (DOM) para garantir o valor mais recente ---
+            const tomboInputEl = document.querySelector(`#row-${id} input[data-field="Tombamento"]`);
+            const currentTomboValue = tomboInputEl ? tomboInputEl.value : item.Tombamento;
+
             const { giapMapAllItems } = getState();
-            const tombo = normalizeTombo(item.Tombamento);
+            const tombo = normalizeTombo(currentTomboValue); // Usa o Tombo lido do campo de input
             const giapItem = tombo ? giapMapAllItems.get(tombo) : null;
 
             if (!giapItem) {
@@ -419,7 +421,8 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                 'Valor NF': giapItem['Valor NF'] || '',
                 Espécie: giapItem['Espécie'] || '',
                 Status_Planilha: giapItem['Status'] || '', // Salva o status original da planilha
-                Observação: `Metadados atualizados do GIAP (via 🔄). | ${item.Observação || ''}`, // Preserva a observação
+                // Preserva a observação existente, adicionando a mensagem de auditoria
+                Observação: `Metadados atualizados do GIAP (via 🔄). | ${item.Observação || ''}`, 
                 updatedAt: serverT()
             };
 
@@ -445,7 +448,6 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                     row.querySelector('input[data-field="Fornecedor"]').value = changes.Fornecedor;
                     row.querySelector('input[data-field="NF"]').value = changes.NF;
                     row.querySelector('input[data-field="Observação"]').value = changes.Observação;
-                    // Outros campos não estão visíveis na tabela, então não precisam de update de input
                 }
 
                 hideOverlay();
