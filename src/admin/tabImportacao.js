@@ -60,7 +60,7 @@ const extractOrigemDoacao = (item) => {
     return ''; // Nenhum encontrado
 };
 
-// Estado local para a importação
+// Estado local para a importação (Aba "Importar e Atualizar Unidade")
 let importData = {
     pasted: [], // Todos os itens colados
     selectedUnitName: null, // A unidade de destino selecionada
@@ -69,13 +69,14 @@ let importData = {
     stItemsInManualLinkPool: new Map(), // Pool de itens S/T do sistema disponíveis para ligação manual
 };
 
-// Estado local para a NOVA funcionalidade
+// Estado local para a NOVA funcionalidade (Aba "Substituir Unidades em Massa")
 let bulkReplaceState = {
     pasted: [], // Todos os itens colados (RAW)
-    systemUnit: null, // Unidade do Sistema (Destino)
-    pastedUnit: null, // Unidade da Planilha (Origem)
-    systemItems: [], // Itens do Sistema na unidade de destino
+    pastedItemsByUnit: new Map(), // Itens da planilha, agrupados por nome de unidade
+    systemItemsByUnit: new Map(), // Itens do Sistema, agrupados por nome de unidade
+    suggestedMappings: new Map(), // Mapeamento sugerido (pastedUnit -> systemUnit)
     previewActions: [], // Ações geradas (CREATE, UPDATE, DELETE)
+    selectedTipo: null, // Tipo de unidade selecionado (Contexto)
 };
 
 
@@ -127,15 +128,14 @@ const DOM_IMPORT = {
     addGiapName: document.getElementById('add-giap-name'),
     saveGiapUnitBtn: document.getElementById('save-giap-unit-btn'),
     
-    // --- NOVOS ELEMENTOS DOM PARA SUBSTITUIÇÃO EM MASSA ---
+    // --- NOVOS ELEMENTOS DOM PARA SUBSTITUIÇÃO EM MASSA (Refatorados) ---
     bulkReplaceTipo: document.getElementById('bulk-replace-tipo'),
-    bulkReplaceSystemUnit: document.getElementById('bulk-replace-system-unit'),
-    loadSystemUnitBtn: document.getElementById('load-system-unit-btn'),
     bulkReplaceData: document.getElementById('bulk-replace-data'),
     previewBulkReplaceBtn: document.getElementById('preview-bulk-replace-btn'),
     bulkReplaceResults: document.getElementById('bulk-replace-results'),
-    bulkReplacePastedUnit: document.getElementById('bulk-replace-pasted-unit'),
-    filterBulkReplaceUnitBtn: document.getElementById('filter-bulk-replace-unit-btn'),
+    bulkReplaceMappingContainer: document.getElementById('bulk-replace-mapping-container'),
+    generateBulkActionsBtn: document.getElementById('generate-bulk-actions-btn'), // ID do novo botão
+    bulkReplacePreviewContainer: document.getElementById('bulk-replace-preview-container'), // NOVO container
     bulkReplaceSummary: document.getElementById('bulk-replace-summary'),
     bulkReplacePreviewTableContainer: document.getElementById('bulk-replace-preview-table-container'),
     bulkReplaceConfirmCheckbox: document.getElementById('bulk-replace-confirm-checkbox'),
@@ -178,49 +178,54 @@ export function populateImportAndReplaceTab() {
         if(select) select.innerHTML = '<option value="">Selecione um Tipo</option>' + tipos.map(t => `<option value="${t}">${t}</option>`).join('');
     });
     
-    // Configura o select de unidade para a nova aba
-    setupUnitSelect(DOM_IMPORT.bulkReplaceTipo, DOM_IMPORT.bulkReplaceSystemUnit);
+    // Configura o select de unidade para a aba "Importar e Atualizar Unidade"
+    setupUnitSelect(DOM_IMPORT.importTipo, DOM_IMPORT.importUnit);
+    
+    // Configura o select de unidade para a aba "Importar por Tombamento"
+    setupUnitSelect(DOM_IMPORT.massTransferTipo, DOM_IMPORT.massTransferUnit);
+    
+    // Configura o select de tipo para a aba "Substituir Unidades em Massa"
+    setupUnitSelect(DOM_IMPORT.bulkReplaceTipo, null); // Só o Tipo
 }
 
 /**
  * Lógica para popular dinamicamente os selects de Unidade com base no Tipo.
  * @param {HTMLSelectElement} tipoSelectEl - Elemento do select de Tipo.
- * @param {HTMLSelectElement} unitSelectEl - Elemento do select de Unidade.
+ * @param {HTMLSelectElement | null} unitSelectEl - Elemento do select de Unidade (opcional).
  */
 function setupUnitSelect(tipoSelectEl, unitSelectEl) {
     tipoSelectEl.addEventListener('change', () => {
         const { patrimonioFullList } = getState();
         const selectedTipo = tipoSelectEl.value;
-        if (!selectedTipo) {
-            unitSelectEl.innerHTML = '<option value="">Selecione uma Unidade</option>'; // Limpa e adiciona a opção padrão
-            unitSelectEl.disabled = true;
-            return;
+        
+        // Se houver um select de unidade acoplado, popula-o
+        if (unitSelectEl) {
+            if (!selectedTipo) {
+                unitSelectEl.innerHTML = '<option value="">Selecione uma Unidade</option>'; // Limpa e adiciona a opção padrão
+                unitSelectEl.disabled = true;
+                return;
+            }
+            
+            const unidadesMap = new Map();
+            patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean).forEach(unidade => {
+                const normalized = normalizeStr(unidade);
+                if (!unidadesMap.has(normalized)) {
+                    unidadesMap.set(normalized, unidade.trim());
+                }
+            });
+            const unidades = [...unidadesMap.values()].sort();
+            unitSelectEl.innerHTML = '<option value="">Selecione uma Unidade</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+            unitSelectEl.disabled = false;
         }
         
-        const unidadesMap = new Map();
-        patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean).forEach(unidade => {
-            const normalized = normalizeStr(unidade);
-            if (!unidadesMap.has(normalized)) {
-                unidadesMap.set(normalized, unidade.trim());
-            }
-        });
-        const unidades = [...unidadesMap.values()].sort();
-        unitSelectEl.innerHTML = '<option value="">Selecione uma Unidade</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
-        unitSelectEl.disabled = false;
-        
-        // NOVO: Adiciona lógica específica para o botão da substituição em massa
-        if(unitSelectEl.id === 'bulk-replace-system-unit') {
-            DOM_IMPORT.loadSystemUnitBtn.disabled = !selectedTipo;
+        // Lógica específica para a aba "Substituir Unidades" (que não tem unitSelectEl acoplado)
+        if(tipoSelectEl.id === 'bulk-replace-tipo') {
+            // Reseta o estado se o tipo mudar
+            bulkReplaceState = { ...bulkReplaceState, selectedTipo: selectedTipo, pasted: [], previewActions: [], pastedItemsByUnit: new Map(), systemItemsByUnit: new Map() };
+            DOM_IMPORT.bulkReplaceResults.classList.add('hidden');
+            DOM_IMPORT.bulkReplaceData.value = '';
         }
     });
-    
-    // NOVO: Adiciona lógica para o botão da substituição em massa
-    if(unitSelectEl.id === 'bulk-replace-system-unit') {
-        unitSelectEl.addEventListener('change', () => {
-             const selectedUnit = unitSelectEl.value;
-             DOM_IMPORT.loadSystemUnitBtn.disabled = !selectedUnit;
-        });
-    }
 }
 
 // --- Funções da Lógica "Importar e Atualizar Unidade" (edit-by-desc) ---
@@ -814,46 +819,33 @@ function handleManualLinkModalClose() {
 // --- FUNÇÕES DA NOVA ABA "Substituir Unidades em Massa" ---
 
 /**
- * 1. Carrega o inventário da unidade de destino.
+ * Passo 3: Processa o Excel colado, extrai unidades e prepara para o mapeamento.
  */
-DOM_IMPORT.loadSystemUnitBtn.addEventListener('click', () => {
+function previewBulkReplace() {
+    const data = DOM_IMPORT.bulkReplaceData.value;
     const selectedTipo = DOM_IMPORT.bulkReplaceTipo.value;
-    const selectedUnit = DOM_IMPORT.bulkReplaceSystemUnit.value;
     
-    if (!selectedTipo || !selectedUnit) {
-        return showNotification('Selecione o Tipo e a Unidade de Destino.', 'warning');
+    if (!selectedTipo) {
+        return showNotification('Passo 1: Selecione o Tipo de Unidade (Contexto) primeiro.', 'warning');
+    }
+    if (!data) {
+        return showNotification('Passo 2: Cole os dados do Excel primeiro.', 'warning');
     }
     
     const { patrimonioFullList } = getState();
     
-    // Filtra itens do sistema na unidade selecionada
-    bulkReplaceState.systemItems = patrimonioFullList.filter(item => 
-        normalizeStr(item.Unidade) === normalizeStr(selectedUnit) &&
-        normalizeStr(item.Tipo) === normalizeStr(selectedTipo)
-    );
-    
-    bulkReplaceState.systemUnit = selectedUnit;
-    bulkReplaceState.pasted = [];
-    bulkReplaceState.pastedUnit = null;
-    bulkReplaceState.previewActions = [];
+    // Reseta o estado
+    bulkReplaceState = {
+        pasted: [],
+        pastedItemsByUnit: new Map(),
+        systemItemsByUnit: new Map(),
+        suggestedMappings: new Map(),
+        previewActions: [],
+        selectedTipo: selectedTipo,
+    };
 
-    showNotification(`Inventário de "${selectedUnit}" (${bulkReplaceState.systemItems.length} itens) carregado para comparação.`, 'info');
-    DOM_IMPORT.bulkReplaceResults.classList.add('hidden');
-});
+    showOverlay('Processando planilha e identificando unidades...');
 
-/**
- * 2. Processa o Excel colado e extrai unidades únicas.
- */
-DOM_IMPORT.previewBulkReplaceBtn.addEventListener('click', () => {
-    const data = DOM_IMPORT.bulkReplaceData.value;
-    
-    if (!bulkReplaceState.systemUnit) {
-        return showNotification('Primeiro, clique em "Carregar Inventário" para definir a unidade de destino.', 'warning');
-    }
-    if (!data) {
-        return showNotification('Cole os dados do Excel primeiro.', 'warning');
-    }
-    
     const parsed = Papa.parse(data, { 
         header: true, 
         skipEmptyLines: true, 
@@ -861,96 +853,189 @@ DOM_IMPORT.previewBulkReplaceBtn.addEventListener('click', () => {
         transformHeader: h => normalizeStr(h)
     }).data;
     
-    if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
+    if (parsed.length === 0) {
+        hideOverlay();
+        return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
+    }
 
     bulkReplaceState.pasted = parsed;
-    bulkReplaceState.previewActions = [];
-    bulkReplaceState.pastedUnit = null;
     
-    // Extrai unidades únicas da planilha colada
-    const uniqueUnits = [...new Set(parsed.map(item => item.unidade).filter(Boolean).map(u => u.trim()))].sort();
+    // Agrupa itens colados por unidade
+    parsed.forEach(item => {
+        const unitName = item.unidade?.trim();
+        if (!unitName) return;
+        if (!bulkReplaceState.pastedItemsByUnit.has(unitName)) {
+            bulkReplaceState.pastedItemsByUnit.set(unitName, []);
+        }
+        bulkReplaceState.pastedItemsByUnit.get(unitName).push(item);
+    });
     
-    DOM_IMPORT.bulkReplacePastedUnit.innerHTML = '<option value="">-- Selecione a Unidade de Origem da Planilha --</option>' + 
-        uniqueUnits.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
-
-    DOM_IMPORT.bulkReplaceSummary.textContent = `Planilha colada contém ${parsed.length} linhas em ${uniqueUnits.length} unidade(s).`;
-    DOM_IMPORT.bulkReplacePreviewTableContainer.innerHTML = '';
-    DOM_IMPORT.filterBulkReplaceUnitBtn.disabled = true;
+    // Agrupa itens do sistema (do TIPO selecionado) por unidade
+    const systemUnitsInType = [];
+    patrimonioFullList.forEach(item => {
+        if (normalizeStr(item.Tipo) === normalizeStr(selectedTipo)) {
+            const unitName = item.Unidade?.trim();
+            if (!unitName) return;
+            
+            if (!bulkReplaceState.systemItemsByUnit.has(unitName)) {
+                bulkReplaceState.systemItemsByUnit.set(unitName, []);
+                systemUnitsInType.push(unitName);
+            }
+            bulkReplaceState.systemItemsByUnit.get(unitName).push(item);
+        }
+    });
+    
+    const pastedUnits = [...bulkReplaceState.pastedItemsByUnit.keys()].sort();
+    const systemUnits = systemUnitsInType.sort();
+    
+    renderBulkReplaceMappingSuggestions(pastedUnits, systemUnits);
+    
+    DOM_IMPORT.bulkReplaceResults.classList.remove('hidden');
+    DOM_IMPORT.bulkReplacePreviewContainer.classList.add('hidden'); // Esconde a pré-visualização (Passo 5)
     DOM_IMPORT.confirmBulkReplaceBtn.disabled = true;
     DOM_IMPORT.bulkReplaceConfirmCheckbox.checked = false;
-    DOM_IMPORT.bulkReplaceResults.classList.remove('hidden');
     
-    // Habilita o filtro
-    DOM_IMPORT.bulkReplacePastedUnit.addEventListener('change', () => {
-        DOM_IMPORT.filterBulkReplaceUnitBtn.disabled = !DOM_IMPORT.bulkReplacePastedUnit.value;
-    }, { once: true });
-});
+    hideOverlay();
+}
 
 /**
- * 3. Compara o inventário da unidade de destino com os dados da planilha. (Core Logic)
+ * Passo 4: Renderiza as sugestões de mapeamento.
  */
-DOM_IMPORT.filterBulkReplaceUnitBtn.addEventListener('click', () => {
-    const selectedPastedUnit = DOM_IMPORT.bulkReplacePastedUnit.value;
-    const { systemUnit, systemItems, pasted } = bulkReplaceState;
-
-    if (!selectedPastedUnit || !systemUnit) {
-        return showNotification('Selecione ambas as unidades para iniciar a comparação.', 'warning');
+function renderBulkReplaceMappingSuggestions(pastedUnits, systemUnits) {
+    const container = DOM_IMPORT.bulkReplaceMappingContainer;
+    container.innerHTML = ''; // Limpa o container
+    
+    if (pastedUnits.length === 0) {
+        container.innerHTML = '<p class="text-red-600">Nenhuma unidade encontrada na planilha colada (verifique a coluna "Unidade").</p>';
+        return;
     }
     
-    showOverlay('Comparando itens...');
+    const systemUnitMap = new Map(systemUnits.map(u => [normalizeStr(u), u]));
     
-    // 1. Filtra itens da planilha para a unidade selecionada (Origem da Planilha)
-    const pastedItemsInUnit = pasted.filter(item => normalizeStr(item.unidade) === normalizeStr(selectedPastedUnit));
+    // Opções do Select (Unidades do Sistema)
+    const systemOptions = `<option value="">-- Ignorar esta Unidade --</option>` + 
+                          systemUnits.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
     
-    // 2. Mapeia itens do sistema por Tombamento (para lookup rápido)
-    const systemItemsByTombo = new Map(systemItems.map(item => [normalizeTombo(item.Tombamento), item]));
-    const tombosSystem = new Set(systemItemsByTombo.keys());
-    const previewActions = [];
-    
-    // --- Loop 1: Itens da Planilha (Criação/Atualização) ---
-    pastedItemsInUnit.forEach(pastedItem => {
-        const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
-        
-        if (!pastedTombo || pastedTombo === 's/t') {
-             // Ignora S/T na planilha para esta operação
-             previewActions.push({ action: 'IGNORE', type: 'Planilha Ignorada', pasted: pastedItem, system: null, reason: 'Item S/T ou sem Tombo na planilha colada.' });
-             return;
-        }
+    let html = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+            <div class="font-semibold text-slate-700">Unidade da Planilha (${pastedUnits.length} Encontradas)</div>
+            <div class="font-semibold text-slate-700">Unidade de Destino no Sistema (ID)</div>
+    `;
 
-        const systemMatch = systemItemsByTombo.get(pastedTombo);
+    pastedUnits.forEach(pastedUnit => {
+        // Tenta encontrar uma sugestão
+        const suggestedSystemUnit = systemUnitMap.get(normalizeStr(pastedUnit));
         
-        if (systemMatch) {
-            // AÇÃO 1: ATUALIZAR
-            // Item existe no sistema e na planilha: Atualiza
-            previewActions.push({ action: 'UPDATE', type: 'Atualizar Item', pasted: pastedItem, system: systemMatch, reason: 'Tombo encontrado. Dados serão sincronizados.' });
-            tombosSystem.delete(pastedTombo); // Remove do set de tombos do sistema para a próxima etapa
-        } else {
-            // AÇÃO 2: CRIAR NOVO
-            // Item existe na planilha mas não no sistema na unidade de destino: Cria
-             previewActions.push({ action: 'CREATE', type: 'Criar Novo Item', pasted: pastedItem, system: null, reason: 'Tombo da planilha não encontrado na unidade de destino.' });
-        }
-    });
-    
-    // --- Loop 2: Itens do Sistema (Exclusão/Checagem) ---
-    systemItems.forEach(systemItem => {
-        const systemTombo = normalizeTombo(systemItem.Tombamento);
-        // Se o tombo ainda está no set, significa que ele está no sistema mas não na planilha filtrada (SOBRA)
-        if (tombosSystem.has(systemTombo)) {
-            // AÇÃO 3: EXCLUIR
-            previewActions.push({ action: 'DELETE', type: 'Excluir Item', pasted: null, system: systemItem, reason: 'Item do sistema não encontrado na planilha de origem. Será excluído para sincronia.' });
+        html += `
+            <div class="flex items-center p-2 bg-slate-200 rounded-lg">
+                <span class="font-medium text-slate-800">${escapeHtml(pastedUnit)}</span>
+                <span class="ml-auto text-xs text-slate-500">(${bulkReplaceState.pastedItemsByUnit.get(pastedUnit).length} itens)</span>
+            </div>
+            <div>
+                <select class="bulk-replace-mapping-select w-full p-2 border rounded-lg bg-white" data-pasted-unit="${escapeHtml(pastedUnit)}">
+                    ${systemOptions}
+                </select>
+            </div>
+        `;
+        
+        // Armazena a sugestão para pré-selecionar
+        if (suggestedSystemUnit) {
+            bulkReplaceState.suggestedMappings.set(pastedUnit, suggestedSystemUnit);
         }
     });
 
-    bulkReplaceState.previewActions = previewActions;
-    renderBulkReplacePreview(previewActions);
-    hideOverlay();
+    html += '</div>';
+    container.innerHTML = html;
     
-    DOM_IMPORT.confirmBulkReplaceBtn.disabled = false;
-    DOM_IMPORT.bulkReplaceConfirmCheckbox.disabled = false;
-});
+    // Pré-seleciona as sugestões
+    container.querySelectorAll('.bulk-replace-mapping-select').forEach(select => {
+        const pastedUnit = select.dataset.pastedUnit;
+        const suggestion = bulkReplaceState.suggestedMappings.get(pastedUnit);
+        if (suggestion) {
+            select.value = suggestion;
+        }
+    });
+}
 
 /**
- * Renderiza a pré-visualização das ações.
+ * Passo 5: Gera as Ações de Sincronização.
+ */
+function generateBulkReplaceActions() {
+    showOverlay('Comparando unidades e gerando ações...');
+    
+    bulkReplaceState.previewActions = [];
+    const mappingSelects = DOM_IMPORT.bulkReplaceMappingContainer.querySelectorAll('.bulk-replace-mapping-select');
+    
+    let validMappingFound = false;
+
+    mappingSelects.forEach(select => {
+        const pastedUnit = select.dataset.pasted-unit;
+        const confirmedSystemUnit = select.value;
+
+        // Se o usuário selecionou "-- Ignorar --" (value=""), não faz nada
+        if (!confirmedSystemUnit) {
+            return;
+        }
+        
+        validMappingFound = true; // Marca que pelo menos um mapeamento foi feito
+
+        // Pega os itens da planilha e do sistema para este par
+        const pastedItems = bulkReplaceState.pastedItemsByUnit.get(pastedUnit) || [];
+        const systemItems = bulkReplaceState.systemItemsByUnit.get(confirmedSystemUnit) || [];
+        
+        // Mapeia itens do sistema por Tombamento (para lookup rápido)
+        const systemItemsByTombo = new Map(systemItems.map(item => [normalizeTombo(item.Tombamento), item]));
+        const tombosSystem = new Set(systemItemsByTombo.keys()); // Tombos existentes no sistema (da unidade de destino)
+
+        // --- Loop 1: Itens da Planilha (Criação/Atualização) ---
+        pastedItems.forEach(pastedItem => {
+            const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
+            
+            if (!pastedTombo || pastedTombo === 's/t') {
+                 bulkReplaceState.previewActions.push({ action: 'IGNORE', type: 'Planilha Ignorada', pasted: pastedItem, system: null, reason: 'Item S/T ou sem Tombo.', systemUnitDestino: confirmedSystemUnit });
+                 return;
+            }
+
+            const systemMatch = systemItemsByTombo.get(pastedTombo);
+            
+            if (systemMatch) {
+                // AÇÃO 1: ATUALIZAR
+                bulkReplaceState.previewActions.push({ action: 'UPDATE', type: 'Atualizar Item', pasted: pastedItem, system: systemMatch, reason: 'Tombo encontrado. Dados serão sincronizados.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
+                tombosSystem.delete(pastedTombo); // Remove do set de tombos do sistema para a próxima etapa (DELETE)
+            } else {
+                // AÇÃO 2: CRIAR NOVO
+                 bulkReplaceState.previewActions.push({ action: 'CREATE', type: 'Criar Novo Item', pasted: pastedItem, system: null, reason: 'Tombo da planilha não encontrado na unidade de destino.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
+            }
+        });
+        
+        // --- Loop 2: Itens do Sistema (Exclusão/Checagem) ---
+        // Todos os Tombos remanescentes em tombosSystem são SOBRAS no sistema que não estão na planilha (serão DELETADOS)
+        systemItems.forEach(systemItem => {
+            const systemTombo = normalizeTombo(systemItem.Tombamento);
+            if (tombosSystem.has(systemTombo)) {
+                // AÇÃO 3: EXCLUIR (Sobra no Sistema)
+                bulkReplaceState.previewActions.push({ action: 'DELETE', type: 'Excluir Item', pasted: null, system: systemItem, reason: 'Item do sistema não encontrado na planilha de origem. Será excluído para sincronia.', systemUnitDestino: confirmedSystemUnit, systemTypeDestino: bulkReplaceState.selectedTipo });
+            }
+        });
+    });
+    
+    if (!validMappingFound) {
+         hideOverlay();
+         return showNotification('Nenhum mapeamento de unidade foi confirmado. Verifique o Passo 4.', 'error');
+    }
+
+    renderBulkReplacePreview(bulkReplaceState.previewActions);
+    DOM_IMPORT.bulkReplacePreviewContainer.classList.remove('hidden');
+    
+    // Habilita o checkbox de confirmação
+    DOM_IMPORT.bulkReplaceConfirmCheckbox.disabled = false;
+    DOM_IMPORT.bulkReplaceConfirmCheckbox.checked = false;
+    
+    hideOverlay();
+}
+
+/**
+ * Renderiza a pré-visualização das ações em lote.
  */
 function renderBulkReplacePreview(actions) {
     const container = DOM_IMPORT.bulkReplacePreviewTableContainer;
@@ -958,66 +1043,88 @@ function renderBulkReplacePreview(actions) {
     
     let updateCount = 0, createCount = 0, deleteCount = 0, ignoreCount = 0;
     
-    const html = `
-        <div class="p-2 overflow-x-auto">
-            <table class="w-full text-sm min-w-[1000px]">
-                <thead class="bg-slate-50">
-                    <tr>
-                        <th class="p-2 text-left">Ação</th>
-                        <th class="p-2 text-left">Tombo</th>
-                        <th class="p-2 text-left">Descrição (Planilha)</th>
-                        <th class="p-2 text-left">Local (Planilha)</th>
-                        <th class="p-2 text-left">Descrição (Sistema)</th>
-                        <th class="p-2 text-left">Local (Sistema)</th>
-                        <th class="p-2 text-left">Motivo/Impacto</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${actions.map(action => {
-                        const isUpdate = action.action === 'UPDATE';
-                        const isCreate = action.action === 'CREATE';
-                        const isDelete = action.action === 'DELETE';
-                        const isIgnore = action.action === 'IGNORE';
-                        
-                        if (isUpdate) updateCount++;
-                        if (isCreate) createCount++;
-                        if (isDelete) deleteCount++;
-                        if (isIgnore) ignoreCount++;
-                        
-                        const tombo = normalizeTombo((action.pasted?.tombamento || action.pasted?.tombo) || action.system?.Tombamento);
-                        const pastedDesc = escapeHtml(action.pasted?.descricao || action.pasted?.item || 'N/A');
-                        const pastedLocal = escapeHtml(action.pasted?.local || action.pasted?.localizacao || 'N/A');
-                        const systemDesc = escapeHtml(action.system?.Descrição || 'N/A');
-                        const systemLocal = escapeHtml(action.system?.Localização || 'N/A');
-
-                        let rowClass = 'bg-slate-50';
-                        if (isUpdate) rowClass = 'bg-green-100/50 hover:bg-green-100';
-                        if (isCreate) rowClass = 'bg-blue-100/50 hover:bg-blue-100';
-                        if (isDelete) rowClass = 'bg-red-100/50 hover:bg-red-100';
-                        if (isIgnore) rowClass = 'bg-gray-100';
-
-                        const actionText = isUpdate ? '<span class="font-bold text-green-700">ATUALIZAR</span>' :
-                                         isCreate ? '<span class="font-bold text-blue-700">CRIAR NOVO</span>' :
-                                         isDelete ? '<span class="font-bold text-red-700">EXCLUIR</span>' :
-                                         '<span class="font-bold text-gray-700">IGNORAR</span>';
-                        
-                        return `
-                            <tr class="border-b ${rowClass}">
-                                <td class="p-2">${actionText}</td>
-                                <td class="p-2 font-mono text-xs">${tombo}</td>
-                                <td class="p-2">${pastedDesc}</td>
-                                <td class="p-2 text-xs">${pastedLocal}</td>
-                                <td class="p-2 text-sm">${systemDesc}</td>
-                                <td class="p-2 text-xs">${systemLocal}</td>
-                                <td class="p-2 text-xs text-slate-600">${action.reason}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
+    // Agrupa por Unidade de Destino
+    const groupedByDestUnit = actions.reduce((acc, action) => {
+        const unitName = action.systemUnitDestino || 'Ignorados';
+        if (!acc[unitName]) acc[unitName] = [];
+        acc[unitName].push(action);
+        return acc;
+    }, {});
     
+    let html = '';
+    
+    Object.keys(groupedByDestUnit).sort().forEach(unitName => {
+        if (unitName === 'Ignorados') return; // Lida com ignorados no final
+        
+        const unitActions = groupedByDestUnit[unitName];
+        
+        html += `
+            <div class="p-2 overflow-x-auto mb-4">
+                <h4 class="text-base font-bold text-blue-700 bg-blue-50 p-2 rounded-t-lg">Destino: ${escapeHtml(unitName)}</h4>
+                <table class="w-full text-sm min-w-[1000px]">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="p-2 text-left">Ação</th>
+                            <th class="p-2 text-left">Tombo</th>
+                            <th class="p-2 text-left">Descrição (Planilha)</th>
+                            <th class="p-2 text-left">Local (Planilha)</th>
+                            <th class="p-2 text-left">Descrição (Sistema)</th>
+                            <th class="p-2 text-left">Local (Sistema)</th>
+                            <th class="p-2 text-left">Motivo/Impacto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        unitActions.forEach(action => {
+            const isUpdate = action.action === 'UPDATE';
+            const isCreate = action.action === 'CREATE';
+            const isDelete = action.action === 'DELETE';
+            const isIgnore = action.action === 'IGNORE';
+            
+            if (isUpdate) updateCount++;
+            if (isCreate) createCount++;
+            if (isDelete) deleteCount++;
+            if (isIgnore) ignoreCount++;
+            
+            const tombo = normalizeTombo((action.pasted?.tombamento || action.pasted?.tombo) || action.system?.Tombamento);
+            const pastedDesc = escapeHtml(action.pasted?.descricao || action.pasted?.item || 'N/A');
+            const pastedLocal = escapeHtml(action.pasted?.local || action.pasted?.localizacao || 'N/A');
+            const systemDesc = escapeHtml(action.system?.Descrição || 'N/A');
+            const systemLocal = escapeHtml(action.system?.Localização || 'N/A');
+
+            let rowClass = 'bg-slate-50';
+            if (isUpdate) rowClass = 'bg-green-100/50 hover:bg-green-100';
+            if (isCreate) rowClass = 'bg-blue-100/50 hover:bg-blue-100';
+            if (isDelete) rowClass = 'bg-red-100/50 hover:bg-red-100';
+            if (isIgnore) rowClass = 'bg-gray-100';
+
+            const actionText = isUpdate ? '<span class="font-bold text-green-700">ATUALIZAR</span>' :
+                             isCreate ? '<span class="font-bold text-blue-700">CRIAR NOVO</span>' :
+                             isDelete ? '<span class="font-bold text-red-700">EXCLUIR</span>' :
+                             '<span class="font-bold text-gray-700">IGNORAR</span>';
+            
+            html += `
+                <tr class="border-b ${rowClass}">
+                    <td class="p-2">${actionText}</td>
+                    <td class="p-2 font-mono text-xs">${tombo}</td>
+                    <td class="p-2">${pastedDesc}</td>
+                    <td class="p-2 text-xs">${pastedLocal}</td>
+                    <td class="p-2 text-sm">${systemDesc}</td>
+                    <td class="p-2 text-xs">${systemLocal}</td>
+                    <td class="p-2 text-xs text-slate-600">${action.reason}</td>
+                </tr>
+            `;
+        });
+        
+        html += `</tbody></table></div>`;
+    });
+    
+    // Adiciona os ignorados (se houver)
+    if (groupedByDestUnit['Ignorados']) {
+        ignoreCount = groupedByDestUnit['Ignorados'].length;
+    }
+
     DOM_IMPORT.bulkReplaceSummary.innerHTML = `
         Ações geradas: <span class="text-green-700">${updateCount} ATUALIZAÇÕES</span>, 
         <span class="text-blue-700">${createCount} NOVOS ITENS</span>, 
@@ -1026,35 +1133,32 @@ function renderBulkReplacePreview(actions) {
         <br>Revise cuidadosamente a coluna **Ação** e **Motivo/Impacto** antes de confirmar.
     `;
     container.innerHTML = html;
+    
+    // Habilita o botão de confirmação final (Passo 6)
+    DOM_IMPORT.confirmBulkReplaceBtn.disabled = !(updateCount + createCount + deleteCount > 0);
 }
 
 /**
- * 4. Confirma as ações e executa o commit.
+ * Passo 6: Confirma as ações e executa o commit.
  */
-DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
+async function confirmBulkReplace(reloadDataCallback) {
     if (!DOM_IMPORT.bulkReplaceConfirmCheckbox.checked) {
-        return showNotification('Você deve confirmar que entende os impactos desta ação.', 'warning');
+        return showNotification('Você deve marcar a caixa de confirmação para executar esta ação.', 'warning');
     }
     
-    const { previewActions, systemUnit } = bulkReplaceState;
+    const { previewActions } = bulkReplaceState;
     if (previewActions.length === 0) return;
 
-    showOverlay(`Executando ${previewActions.length} ações em lote para ${systemUnit}...`);
+    const actionsToRun = previewActions.filter(a => a.action !== 'IGNORE');
+    if (actionsToRun.length === 0) return showNotification('Nenhuma ação (Criar, Atualizar, Excluir) foi gerada.', 'info');
+
+    showOverlay(`Executando ${actionsToRun.length} ações em lote...`);
     
     const batch = writeBatch(db);
-    const { patrimonioFullList } = getState();
     const newItemsForCache = [];
     const itemsToDeleteFromCache = [];
-    let executedCount = 0;
 
-    // Obtém o Tipo da unidade de destino (usado para novos itens)
-    const targetType = patrimonioFullList.find(i => normalizeStr(i.Unidade) === normalizeStr(systemUnit))?.Tipo || 'N/A (Verificar)';
-
-
-    previewActions.forEach(action => {
-        if (action.action === 'IGNORE') return;
-        
-        executedCount++;
+    actionsToRun.forEach(action => {
         const docRef = action.system ? doc(db, 'patrimonio', action.system.id) : doc(collection(db, 'patrimonio'));
         
         if (action.action === 'UPDATE') {
@@ -1063,19 +1167,20 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
             
             const changes = {
                 // Colunas pedidas pelo usuário: Tipo, Tombamento, Descrição, Quantidade, Localização, Estado, Origem da Doação, Observação, Fornecedor
-                Tipo: pasted.tipo || system.Tipo || targetType,
+                Tipo: pasted.tipo || action.systemTypeDestino || system.Tipo,
                 Tombamento: normalizeTombo(pasted.tombamento || pasted.tombo),
                 Descrição: pasted.descricao || pasted.item || system.Descrição,
+                Unidade: action.systemUnitDestino, // Garante que está na unidade correta
                 Quantidade: parseInt(pasted.quantidade, 10) || 1,
                 Localização: pasted.localizacao || pasted.local || system.Localização || '',
                 Estado: normalizeEstadoConservacao(pasted['estado de conservacao'] || pasted.estado || system.Estado),
                 'Origem da Doação': extractOrigemDoacao(pasted) || system['Origem da Doação'] || '',
-                Observação: pasted.observacao || pasted.obs || system.Observação || '',
+                Observação: pasted.observacao || pasted.obs || system.Observação || '[Atualizado via Substituição em Massa]',
                 Fornecedor: pasted.fornecedor || system.Fornecedor || '',
                 
                 // Campos de auditoria
                 updatedAt: serverT(),
-                etiquetaPendente: true // Se o tombo foi atualizado ou criado, marca como pendente
+                etiquetaPendente: true 
             };
             batch.update(docRef, changes);
             
@@ -1085,11 +1190,10 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
 
             const newItem = {
                 id: docRef.id,
-                // Colunas pedidas pelo usuário:
-                Tipo: pasted.tipo || targetType,
+                Tipo: pasted.tipo || action.systemTypeDestino,
                 Tombamento: tombo,
                 Descrição: pasted.descricao || pasted.item || 'Item sem descrição',
-                Unidade: systemUnit, // Cria na unidade de destino
+                Unidade: action.systemUnitDestino, // Cria na unidade de destino
                 Quantidade: parseInt(pasted.quantidade, 10) || 1,
                 Localização: pasted.localizacao || pasted.local || '',
                 Estado: normalizeEstadoConservacao(pasted['estado de conservacao'] || pasted.estado || 'Regular'),
@@ -1097,7 +1201,6 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
                 Observação: pasted.observacao || pasted.obs || '[Criado via Substituição em Massa]',
                 Fornecedor: pasted.fornecedor || '',
                 
-                // Campos de auditoria
                 etiquetaPendente: true,
                 isPermuta: false,
                 createdAt: serverT(),
@@ -1107,7 +1210,6 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
             newItemsForCache.push(newItem);
             
         } else if (action.action === 'DELETE') {
-            // AÇÃO: EXCLUIR
             batch.delete(docRef);
             itemsToDeleteFromCache.push(docRef.id);
         }
@@ -1116,18 +1218,17 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
     try {
         await batch.commit();
         
-        // Atualiza o cache local
         if (newItemsForCache.length > 0) await idb.patrimonio.bulkAdd(newItemsForCache);
         if (itemsToDeleteFromCache.length > 0) await idb.patrimonio.bulkDelete(itemsToDeleteFromCache);
         
-        // Limpa todo o cache de metadados para forçar o reload do Inventário
         await idb.metadata.clear(); 
         
-        showNotification(`${executedCount} ações de substituição em massa concluídas! Recarregando...`, 'success');
+        showNotification(`${actionsToRun.length} ações de substituição em massa concluídas! Recarregando...`, 'success');
         
         // Reseta a UI da aba
         DOM_IMPORT.bulkReplaceResults.classList.add('hidden');
         DOM_IMPORT.bulkReplaceData.value = '';
+        DOM_IMPORT.bulkReplaceTipo.value = '';
         
         // Força o recarregamento do estado global
         reloadDataCallback(true); 
@@ -1137,7 +1238,7 @@ DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', async () => {
         showNotification('Erro ao salvar as ações de substituição em massa.', 'error');
         console.error('Erro ao processar ações em lote:', error);
     }
-});
+}
 
 
 // --- LISTENERS ---
@@ -1146,7 +1247,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
     // 1. Setup para selects de unidade
     setupUnitSelect(DOM_IMPORT.massTransferTipo, DOM_IMPORT.massTransferUnit);
     setupUnitSelect(DOM_IMPORT.importTipo, DOM_IMPORT.importUnit); 
-    setupUnitSelect(DOM_IMPORT.bulkReplaceTipo, DOM_IMPORT.bulkReplaceSystemUnit); // NOVO
+    setupUnitSelect(DOM_IMPORT.bulkReplaceTipo, null); // NOVO
 
     // 2. Lógica de Importação em Massa (Mantida)
     DOM_IMPORT.massTransferSearchBtn.addEventListener('click', async () => {
@@ -1587,4 +1688,19 @@ export function setupImportacaoListeners(reloadDataCallback) {
             console.error('Erro ao atualizar itens:', error);
         }
     });
+    
+    // --- (NOVO) Listeners para "Substituir Unidades em Massa" ---
+    
+    // Passo 3: Botão "Identificar Unidades e Mapear"
+    DOM_IMPORT.previewBulkReplaceBtn.addEventListener('click', previewBulkReplace);
+    
+    // Passo 4: Botão "Gerar Ações de Sincronização" (Usa delegação de evento)
+    DOM_IMPORT.bulkReplaceResults.addEventListener('click', (e) => {
+        if (e.target.id === 'generate-bulk-actions-btn') {
+            generateBulkReplaceActions();
+        }
+    });
+
+    // Passo 6: Botão "Confirmar Ações em Lote"
+    DOM_IMPORT.confirmBulkReplaceBtn.addEventListener('click', () => confirmBulkReplace(reloadDataCallback));
 }
