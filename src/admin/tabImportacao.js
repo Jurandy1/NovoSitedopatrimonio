@@ -374,6 +374,7 @@ function processUnitMappingAndLoadItems() {
  * Encontra a melhor correspondência para a planilha: Tombo Exato OU Match Rígido (S/T).
  */
 function findBestMatch(pastedItem, itemsPool) {
+    const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
     const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
     const pastedLocal = normalizeStr(pastedItem.local || pastedItem.localizacao || '');
     const pastedEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
@@ -392,7 +393,37 @@ function findBestMatch(pastedItem, itemsPool) {
         }
     }
     
-    // Neste ponto, o item é um Sobrante/Não Encontrado (Tombo da planilha não está no sistema).
+    // --- NOVO PASSO: BUSCA POR MATCH RÍGIDO em CANDIDATOS S/T ---
+    // Isto ocorre APENAS se o Tombo da Planilha NÃO foi encontrado no sistema (que é o caso atual, pois a Busca 1 falhou).
+
+    // Filtro de candidatos: APENAS itens S/T (sem Tombo) para LIGAR
+    const stCandidates = itemsPool.filter(item => {
+        const tombo = normalizeTombo(item.Tombamento);
+        // Garante que é S/T e não é permuta
+        return (tombo === 's/t' || tombo === '') && !item.isPermuta;
+    });
+
+    // 2. Match: Rígido (Local + Estado + Nome Similar) em CANDIDATOS S/T
+    for (const systemItem of stCandidates) {
+        const systemDesc = normalizeStr(systemItem.Descrição);
+        const systemLocal = normalizeStr(systemItem.Localização);
+        const systemEstado = normalizeEstadoConservacao(systemItem.Estado);
+        
+        // Requisito: Local e Estado devem ser EXATOS (RIGOROSO)
+        if (systemLocal !== pastedLocal || systemEstado !== pastedEstado) {
+            continue; 
+        }
+
+        // Requisito: Nome QUASE IGUAL (similaridade alta > 0.9)
+        const nameScore = calculateSimilarity(pastedDesc, systemDesc);
+        if (nameScore > 0.9) { 
+            // Match encontrado! Este item S/T será atualizado com o Tombo da planilha.
+            return { match: systemItem, score: 0.95, reason: 'Match Rigoroso em S/T' }; 
+        }
+    }
+    
+    // --- 3. Falha: Sobrando ---
+    // Se não achou por Tombo Exato E não achou por Match Rígido em S/T.
     return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
 // FIM DA ALTERAÇÃO
@@ -484,11 +515,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
 
             if (bestMatch) {
-                // Correspondência Forte (Verde - Score 1.0)
+                // Correspondência Forte (Verde - Score 1.0 ou 0.95)
                 rowClass = 'bg-green-50';
                 
-                // MENSAGEM: Indica se foi por Tombo Exato (o único match possível agora)
-                const matchReason = 'Tombo Exato';
+                // MENSAGEM: Indica se foi por Tombo Exato ou Match Rígido (S/T)
+                const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rígido (S/T)';
                 const systemOrigem = bestMatch['Origem da Doação'] || 'N/D';
                 
                 systemHtml = `
