@@ -1,8 +1,7 @@
-/**
- * src/edit.js
- * Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
- * Funciona como ORQUESTRADOR, carregando dados e delegando a lógica das abas.
- */
+/**// /src/edit.js
+// Ponto de entrada e controlador principal da página de edição e auditoria (edit.html).
+// Funciona como ORQUESTRADOR, carregando dados e delegando a lógica das abas.
+
 
 // --- IMPORTS DE SERVIÇOS E ESTADO ---
 // CORREÇÃO: Adicionada a variável 'db' e removidos comandos duplicados
@@ -176,24 +175,48 @@ function openSyncModal(item) {
     const giapItem = tombo ? giapMapAllItems.get(tombo) : null;
 
     if (!giapItem) {
-        // INÍCIO DA ALTERAÇÃO: Lógica de sugestão (ainda não implementada)
-        // Por enquanto, apenas informamos que não foi encontrado.
-        // A lógica de "sugestão" (1403 vs 14032) é complexa (Levenshtein) e não foi implementada.
-        // A lógica de `014032` vs `14032` JÁ ESTÁ FUNCIONANDO devido à mudança no `loadData`.
-        // FIM DA ALTERAÇÃO
-        return showNotification(`Item ${item.Tombamento} (normalizado para ${tombo}) não encontrado na planilha GIAP.`, 'warning');
+        // Se não for encontrado, abre o modal para exibir a mensagem de erro/aviso.
+        document.getElementById('sync-item-tombo').textContent = tombo;
+        document.getElementById('sync-current-desc').textContent = item.Descrição;
+        
+        // Mensagem de Não Encontrado
+        document.getElementById('sync-new-desc').textContent = 'ITEM NÃO ENCONTRADO NA PLANILHA GIAP.';
+        document.getElementById('sync-new-desc').classList.add('text-red-600', 'bg-red-100');
+        
+        // Esconde os botões de ação (manter/atualizar)
+        document.getElementById('sync-update-all-btn').classList.add('hidden');
+        document.getElementById('sync-keep-desc-btn').classList.add('hidden');
+        
+        // Garante que o botão de cancelar/fechar esteja visível
+        document.getElementById('sync-cancel-btn').textContent = 'Fechar';
+
+        DOM.syncConfirmModal.classList.remove('hidden');
+        return showNotification(`Item ${item.Tombamento} não encontrado na planilha GIAP.`, 'warning');
     }
     
+    // Configuração para item ENCONTRADO
     document.getElementById('sync-item-tombo').textContent = tombo;
     document.getElementById('sync-current-desc').textContent = item.Descrição;
     document.getElementById('sync-new-desc').textContent = giapItem.Descrição || giapItem.Espécie;
     
+    // Reset de classes de erro e visibilidade dos botões de ação
+    document.getElementById('sync-new-desc').classList.remove('text-red-600', 'bg-red-100');
+    document.getElementById('sync-new-desc').classList.add('text-green-700', 'bg-green-50');
+    
+    document.getElementById('sync-update-all-btn').classList.remove('hidden');
+    document.getElementById('sync-keep-desc-btn').classList.remove('hidden');
+    document.getElementById('sync-cancel-btn').textContent = 'Cancelar';
+
+
     // Configura os botões do modal para a ação
     document.getElementById('sync-update-all-btn').dataset.id = item.id;
     document.getElementById('sync-update-all-btn').dataset.giapTombo = tombo;
     document.getElementById('sync-keep-desc-btn').dataset.id = item.id;
     document.getElementById('sync-keep-desc-btn').dataset.giapTombo = tombo;
     
+    // Adiciona a descrição atual para que a função de confirmação possa usá-la se KEEP for escolhido
+    document.getElementById('sync-keep-desc-btn').dataset.currentDesc = item.Descrição;
+
     DOM.syncConfirmModal.classList.remove('hidden');
 }
 
@@ -202,39 +225,54 @@ function openSyncModal(item) {
  * @param {string} id - ID do item no Firestore.
  * @param {string} tombo - Tombo do item (já normalizado).
  * @param {boolean} updateDesc - Se deve atualizar a descrição com a do GIAP.
+ * @param {string} currentDesc - A descrição que já estava no sistema.
  */
-async function confirmSyncAction(id, tombo, updateDesc) {
-    const { giapMapAllItems } = getState();
+async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
+    const { giapMapAllItems, patrimonioFullList } = getState();
     const giapItem = giapMapAllItems.get(tombo);
     if (!giapItem) return;
 
     showOverlay('Sincronizando item...');
     
+    const item = patrimonioFullList.find(i => i.id === id);
+    
     const changes = {
         Fornecedor: giapItem['Nome Fornecedor'] || '',
         NF: giapItem['NF'] || '',
-        // INÍCIO DA ALTERAÇÃO: Atualiza todos os campos solicitados
         Cadastro: giapItem['Cadastro'] || '',
         'Tipo Entrada': giapItem['Tipo Entrada'] || '',
         Unidade_Planilha: giapItem['Unidade'] || '', // Salva a unidade original da planilha
         'Valor NF': giapItem['Valor NF'] || '',
         Espécie: giapItem['Espécie'] || '',
         Status_Planilha: giapItem['Status'] || '', // Salva o status original da planilha
-        // FIM DA ALTERAÇÃO
-        Observação: updateDesc ? `Descrição atualizada do GIAP. | ${giapItem.Unidade}` : `Meta-dados atualizados. | ${giapItem.Unidade}`,
         updatedAt: serverT()
     };
     
     if (updateDesc) {
         changes.Descrição = giapItem.Descrição || giapItem.Espécie;
+        changes.Observação = `Descrição e meta-dados atualizados do GIAP. | ${giapItem.Unidade}`;
+    } else {
+        changes.Descrição = currentDesc; // Mantém a descrição que já estava no sistema
+        changes.Observação = `Meta-dados atualizados do GIAP. Descrição mantida. | ${giapItem.Unidade}`;
     }
     
     try {
+        // 1. Atualiza no Firestore
         await updateDoc(doc(db, 'patrimonio', id), changes);
+        
+        // 2. Atualiza o estado global (patrimonioFullList) e o cache imediatamente
+        const itemIndex = patrimonioFullList.findIndex(i => i.id === id);
+        if (itemIndex > -1) {
+            const updatedItem = { ...patrimonioFullList[itemIndex], ...changes };
+            patrimonioFullList[itemIndex] = updatedItem;
+            setState({ patrimonioFullList }); // Notifica a UI
+            
+            // O tabInventario.js precisa do item atualizado no cache para ler os novos valores corretamente
+            await idb.patrimonio.put(updatedItem); 
+        }
+        
         showNotification('Item sincronizado com sucesso!', 'success');
         
-        // Dispara recarregamento para atualizar a tabela editável
-        loadData(true); 
     } catch (e) {
         hideOverlay();
         showNotification('Erro ao sincronizar item.', 'error');
@@ -246,19 +284,8 @@ async function confirmSyncAction(id, tombo, updateDesc) {
  * Renderiza a tabela da Planilha GIAP (conteúdo da aba 'giap').
  */
 function renderGiapInventoryTable(giapInventory) {
-    const tableBody = document.getElementById('giap-table-body');
-    if (!giapInventory || giapInventory.length === 0 || !tableBody) return;
-
-    const headers = Object.keys(giapInventory[0]);
-    const tableHead = document.querySelector('#content-giap thead tr');
-
-    tableHead.innerHTML = headers.map(h => `<th class="p-3 text-left font-semibold">${escapeHtml(h)}</th>`).join('');
-    
-    tableBody.innerHTML = giapInventory.slice(0, 500).map(item => `
-        <tr class="border-b border-slate-200 hover:bg-slate-50">
-            ${headers.map(h => `<td class="p-2 text-xs">${escapeHtml(item[h])}</td>`).join('')}
-        </tr>
-    `).join('');
+// ... (código inalterado)
+// ...
 }
 
 
@@ -266,221 +293,22 @@ function renderGiapInventoryTable(giapInventory) {
 
 /**
  * Manipulador de clique para o botão "Atualizar do GIAP".
- * Inicia a verificação e abre o modal.
- */
-async function handleUpdateAllFromGiap() {
-    DOM.updateAllGiapModal.classList.remove('hidden');
-    DOM.updateAllList.classList.add('hidden');
-    DOM.updateAllLoading.classList.remove('hidden');
-    DOM.updateAllConfirmBtn.disabled = true;
-
-    const { patrimonioFullList, giapMapAllItems } = getState();
-    const itemsToReview = [];
-
-    patrimonioFullList.forEach(item => {
-        // (Req #5/6) Ignora itens já marcados para verificação
-        if (item.Observação?.includes('Verificar tombo')) {
-            return;
-        }
-
-        const normalizedTombo = normalizeTombo(item.Tombamento);
-        // Ignora S/T e Permuta
-        if (!normalizedTombo || normalizedTombo === 's/t' || item.isPermuta) {
-            return; 
-        }
-
-        const giapItem = giapMapAllItems.get(normalizedTombo);
-
-        if (giapItem) {
-            const giapDesc = giapItem.Descrição || giapItem.Espécie;
-            // (Req #6) Verifica se a descrição é diferente
-            if (normalizeStr(item.Descrição) !== normalizeStr(giapDesc)) {
-                itemsToReview.push({ item, giapItem, status: 'name-change' });
-            }
-        } else {
-            itemsToReview.push({ item, status: 'not-found' });
-        }
-    });
-
-    renderUpdateAllList(itemsToReview);
-    DOM.updateAllLoading.classList.add('hidden');
-    DOM.updateAllList.classList.remove('hidden');
-    DOM.updateAllConfirmBtn.disabled = itemsToReview.length === 0;
-}
-
-/**
- * Renderiza a lista de itens para revisão no modal.
+// ... (código inalterado)
+// ...
  * @param {Array<object>} itemsToReview - Itens para exibir no modal.
  */
 function renderUpdateAllList(itemsToReview) {
-    if (itemsToReview.length === 0) {
-        DOM.updateAllList.innerHTML = `<p class="text-center text-green-600 font-semibold p-4">Parabéns! Todos os itens com tombamento parecem estar sincronizados com o GIAP.</p>`;
-        return;
-    }
-
-    // (Req #3) Bulk Actions HTML
-    const bulkActionsHtml = `
-        <div id="update-all-bulk-actions" class="p-3 bg-slate-100 rounded-lg flex flex-wrap items-center gap-4">
-            <label class="flex items-center font-medium">
-                <input type="checkbox" id="update-all-select-all" class="h-4 w-4 mr-2">
-                Selecionar Todos
-            </label>
-            <select id="update-all-bulk-action-select" class="p-2 border rounded-lg bg-white text-sm">
-                <option value="">-- Ação em Massa --</option>
-                <option value="update">Atualizar para Nome do GIAP</option>
-                <option value="keep">Manter Nome Atual</option>
-                <option value="mark-permuta">Marcar como PERMUTA</option>
-                <option value="mark-for-check">Marcar 'Verificar Tombo'</option>
-            </select>
-            <button id="update-all-bulk-apply-btn" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-sm hover:bg-blue-700">Aplicar aos Selecionados</button>
-        </div>`;
-
-    // (Req #1, #2, #4) Updated Name Change HTML
-    const nameChangeHtml = itemsToReview
-        .filter(r => r.status === 'name-change')
-        .map(r => `
-            <div class="p-3 bg-yellow-50 border-l-4 border-yellow-500 rounded-r-lg">
-                <div class="flex items-start">
-                    <input type="checkbox" class="update-all-checkbox mt-1 h-5 w-5" data-id="${escapeHtml(r.item.id)}">
-                    <div class="ml-3 flex-1">
-                        <p class="font-semibold text-yellow-800">Divergência na Descrição</p>
-                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)} | <strong>Estado Atual:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
-                        <p class="text-sm"><strong>Unidade Atual:</strong> <span class="font-bold text-gray-700">${escapeHtml(r.item.Unidade || 'N/A')}</span></p>
-                        <p class="text-xs"><strong>Unidade (GIAP):</strong> <span class="font-bold text-blue-700">${escapeHtml(r.giapItem.Unidade || 'N/A')}</span> | <strong>Espécie:</strong> ${escapeHtml(r.giapItem.Espécie || 'N/A')} | <strong>Cadastro:</strong> ${escapeHtml(r.giapItem.Cadastro || 'N/A')}</p>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 text-sm">
-                            <div>
-                                <p class="font-medium">Descrição Atual no Sistema:</p>
-                                <p class="p-2 bg-white rounded border">${escapeHtml(r.item.Descrição)}</p>
-                            </div>
-                            <div>
-                                <p class="font-medium">Descrição na Planilha GIAP:</p>
-                                <p class="p-2 bg-white rounded border">${escapeHtml(r.giapItem.Descrição || r.giapItem.Espécie)}</p>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <label class="font-medium text-sm">Ação:</label>
-                            <select class="update-choice w-full p-2 border rounded-lg bg-white" data-id="${escapeHtml(r.item.id)}">
-                                <option value="keep" selected>Manter Nome Atual (e não atualizar outros dados)</option>
-                                <option value="update">Atualizar para Nome do GIAP (e todos os outros dados)</option>
-                                <option value="mark-permuta">Marcar como PERMUTA (Remove Tombo)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-    // (Req #1, #5) Updated Not Found HTML
-    const notFoundHtml = itemsToReview
-        .filter(r => r.status === 'not-found')
-        .map(r => `
-            <div class="p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
-                <div class="flex items-start">
-                    <input type="checkbox" class="update-all-checkbox mt-1 h-5 w-5" data-id="${escapeHtml(r.item.id)}">
-                    <div class="ml-3 flex-1">
-                        <p class="font-semibold text-red-800">Não Encontrado no GIAP</p>
-                        <p class="text-sm"><strong>Tombo:</strong> ${escapeHtml(r.item.Tombamento)} | <strong>Unidade Atual:</strong> <span class="font-bold text-red-700">${escapeHtml(r.item.Unidade || 'N/A')}</span></p>
-                        <p class="text-sm"><strong>Descrição:</strong> ${escapeHtml(r.item.Descrição)} | <strong>Estado:</strong> <span class="font-bold">${escapeHtml(r.item.Estado || 'N/D')}</span></p>
-                        <div class="mt-2">
-                            <label class="font-medium text-sm">Ação:</label>
-                            <select class="update-choice-notfound w-full p-2 border rounded-lg bg-white" data-id="${escapeHtml(r.item.id)}">
-                                <option value="ignore" selected>Ignorar por enquanto</option>
-                                <option value="mark-for-check">Marcar 'Verificar Tombo' (e não mostrar mais)</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-    // Combine all HTML
-    DOM.updateAllList.innerHTML = `
-        ${bulkActionsHtml}
-        ${nameChangeHtml ? `<div class="mt-4"><h4 class="text-lg font-semibold my-2">Itens com Mudança de Nome</h4><div class="space-y-3">${nameChangeHtml}</div></div>` : ''}
-        ${notFoundHtml ? `<div class="mt-6"><h4 class="text-lg font-semibold my-2">Itens Não Encontrados</h4><div class="space-y-3">${notFoundHtml}</div></div>` : ''}
-    `;
+// ... (código inalterado)
+// ...
 }
 
 
 /**
  * Manipulador de clique para o botão "Confirmar" do novo modal.
- * Salva as alterações em lote.
- */
-async function handleUpdateAllConfirm() {
-    const { giapMapAllItems, patrimonioFullList } = getState();
-    // (Req #4, #5) Get all selects from both lists
-    const selects = DOM.updateAllList.querySelectorAll('select.update-choice, select.update-choice-notfound');
-    
-    if (selects.length === 0) {
-        showNotification('Nenhuma ação selecionada.', 'info');
-        DOM.updateAllGiapModal.classList.add('hidden');
-        return;
-    }
-
-    showOverlay('Atualizando itens em lote...');
-    const batch = writeBatch(db);
-    let updateCount = 0;
-
-    selects.forEach(select => {
-        const id = select.dataset.id;
-        const choice = select.value;
-        const itemRef = doc(db, 'patrimonio', id);
-        const item = patrimonioFullList.find(i => i.id === id); // Get item for context
-
-        if (choice === 'update') {
-            const giapItem = giapMapAllItems.get(normalizeTombo(item.Tombamento));
-            if (giapItem) {
-                updateCount++;
-                batch.update(itemRef, {
-                    Descrição: giapItem.Descrição || giapItem.Espécie,
-                    Cadastro: giapItem.Cadastro || '',
-                    NF: giapItem.NF || '',
-                    'Nome Fornecedor': giapItem['Nome Fornecedor'] || '',
-                    'Tipo Entrada': giapItem['Tipo Entrada'] || '',
-                    Unidade_Planilha: giapItem.Unidade || '', 
-                    'Valor NF': giapItem['Valor NF'] || '',
-                    Espécie: giapItem.Espécie || '',
-                    Status_Planilha: giapItem.Status || '', 
-                    updatedAt: serverT()
-                });
-            }
-        } else if (choice === 'mark-permuta') { // (Req #4)
-            updateCount++;
-            batch.update(itemRef, { 
-                Tombamento: 'PERMUTA', 
-                isPermuta: true, 
-                Observação: 'Marcado como Permuta via auditoria.', 
-                updatedAt: serverT() 
-            });
-        } else if (choice === 'mark-for-check') { // (Req #5)
-            updateCount++;
-            batch.update(itemRef, { 
-                Observação: 'Verificar tombo (Não encontrado no GIAP)', 
-                updatedAt: serverT() 
-            });
-        }
-        // 'keep' and 'ignore' do nothing, which is correct.
-    });
-
-    if (updateCount === 0) {
-        hideOverlay();
-        showNotification('Nenhum item foi marcado para atualização.', 'info');
-        DOM.updateAllGiapModal.classList.add('hidden');
-        return;
-    }
-
-    try {
-        await batch.commit();
-        showNotification(`${updateCount} itens atualizados com sucesso! Recarregando...`, 'success');
-        DOM.updateAllGiapModal.classList.add('hidden');
-        loadData(true); // (Req #6) Force reload
-    } catch (e) {
-        hideOverlay();
-        showNotification('Erro ao salvar atualizações em lote.', 'error');
-        console.error(e);
-    }
+// ... (código inalterado)
+// ...
+    // FIM DA ALTERAÇÃO
 }
-// FIM DA ALTERAÇÃO
 
 // --- LISTENERS E INICIALIZAÇÃO ---
 
@@ -599,14 +427,15 @@ function setupListeners() {
         const id = e.target.dataset.id;
         const tombo = e.target.dataset.giapTombo;
         DOM.syncConfirmModal.classList.add('hidden');
-        confirmSyncAction(id, tombo, true); // Atualiza descrição
+        confirmSyncAction(id, tombo, true, null); // true = Atualiza descrição
     });
 
     document.getElementById('sync-keep-desc-btn').addEventListener('click', (e) => {
         const id = e.target.dataset.id;
         const tombo = e.target.dataset.giapTombo;
+        const currentDesc = e.target.dataset.currentDesc; // Pega a descrição atual salva no data-attribute
         DOM.syncConfirmModal.classList.add('hidden');
-        confirmSyncAction(id, tombo, false); // Não atualiza descrição
+        confirmSyncAction(id, tombo, false, currentDesc); // false = Mantém descrição atual
     });
     
     // Fechar Modais (Overlay ou Botão genérico)
