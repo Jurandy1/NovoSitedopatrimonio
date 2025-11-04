@@ -379,8 +379,8 @@ function findBestMatch(pastedItem, itemsPool) {
     const pastedEstado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
     
     // --- 1. Busca Preliminar: Item Tombado (Tombo Exato) ---
-    // Se o Tombo da PLANILHA já existe no sistema, atualiza AQUELE item. (PRIORIDADE MÁXIMA)
-    if (pastedTombo) { // O filtro de entrada garante que pastedTombo é numérico aqui
+    // O filtro de entrada garante que pastedTombo é numérico aqui.
+    if (pastedTombo) { 
         const exactTomboMatch = itemsPool.find(item => normalizeTombo(item.Tombamento) === pastedTombo);
         if (exactTomboMatch) {
             // Se o item JÁ TIVER O MESMO TOMBO, DESCARTAR para não poluir a lista. (REGRA DO USUÁRIO)
@@ -392,12 +392,7 @@ function findBestMatch(pastedItem, itemsPool) {
         }
     }
     
-    // Se não achou por Tombo Exato, e a planilha TEM TOMBO (filtro de entrada garante), 
-    // então é um item "Sobrando" para criar, ou é um S/T da planilha que foi permitido passar
-    // (o que não deve acontecer no filtro atual, mas se acontecesse, ele cairia em "Tombo Não Encontrado").
-    
-    // Neste ponto, como o filtro de entrada agora é *rígido* para apenas tombos numéricos, 
-    // se não houver Tombo Exato, o item é um Sobrante/Não Encontrado (Tombo da planilha não está no sistema).
+    // Neste ponto, o item é um Sobrante/Não Encontrado (Tombo da planilha não está no sistema).
     return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
 // FIM DA ALTERAÇÃO
@@ -522,8 +517,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                             <option value="create_new" selected>Criar Novo Item (Sobrando)</option>
                             <option value="ignore">Ignorar Linha</option>
                         </select>
-                        <!-- BOTÃO DE LIGAÇÃO MANUAL APENAS PARA ITENS S/T (ESTE FILTRO NÃO DEVE MAIS APARECER, POIS A ENTRADA É SÓ TOMBO) -->
-                        <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600 hidden">Ligar S/T Manualmente</button>
+                        <!-- BOTÃO DE LIGAÇÃO MANUAL -->
+                        <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
                     </div>
                 `;
             }
@@ -605,22 +600,23 @@ function openManualLinkModal(rowIndex) {
     DOM_IMPORT.manualLinkUnitName.textContent = systemUnitName;
 
     // --- LÓGICA DE FILTRAGEM RÍGIDA E PONTUAÇÃO (REGRA DO USUÁRIO) ---
+    
+    // Pool completo de S/T para a unidade (já exclui itens com tombo e permuta)
     const allStCandidatesPool = multiUnitImportData.stItemsInManualLinkPool.get(systemUnitName) || [];
     
-    // 1. Aplica Filtro de Localização Rígida (Se a planilha tiver Local, só mostra itens desse Local)
-    let systemItemsFilteredByLocation = [];
+    let systemItems = allStCandidatesPool;
     let locationMatch = false;
 
-    if (pastedLocal) {
-        systemItemsFilteredByLocation = allStCandidatesPool.filter(item => 
+    // 1. Aplica Filtro de Localização Rígida (Se a planilha tiver Local, só mostra itens desse Local)
+    if (pastedLocal && pastedLocal !== 'n/a' && pastedLocal !== 'n/i') {
+        const filteredByLocation = allStCandidatesPool.filter(item => 
             normalizeStr(item.Localização) === pastedLocal
         );
-        locationMatch = systemItemsFilteredByLocation.length > 0;
+        // O filtro rígido: Se o local for especificado na planilha, a lista de sugestões SÓ PODE ter itens desse local.
+        systemItems = filteredByLocation;
+        locationMatch = filteredByLocation.length > 0;
     } 
 
-    // Define a lista final: se achou no local, usa só a lista filtrada; senão, usa a lista completa do pool S/T
-    let systemItems = locationMatch ? systemItemsFilteredByLocation : allStCandidatesPool;
-    
     // 2. Aplica Filtro de Similaridade e Ordenação 
     const pastedDesc = normalizeStr(pastedItem.descricao || pastedItem.item || '');
 
@@ -647,6 +643,10 @@ function openManualLinkModal(rowIndex) {
             const systemOrigem = item['Origem da Doação'] || 'N/D';
             const itemOrigem = systemOrigem.length > 20 ? systemOrigem.substring(0, 17) + '...' : systemOrigem;
             
+            // Verifica o estado para destaque
+            const systemEstado = normalizeEstadoConservacao(item.Estado || 'Regular');
+            const estadoHighlight = systemEstado === pastedEstado ? 'text-green-600' : 'text-red-600';
+
             return `
                 <option value="${item.id}" data-score="${score.toFixed(2)}">
                     [Score: ${score.toFixed(2)}] ${escapeHtml(item.Descrição)} 
@@ -663,9 +663,10 @@ function openManualLinkModal(rowIndex) {
         if (pastedLocal && locationMatch) {
              filterMessage.innerHTML = `<span class="font-semibold text-green-700">${systemItems.length} itens</span> filtrados estritamente pela Localização correspondente (${pastedLocalDisplay}).`;
         } else if (pastedLocal && !locationMatch) {
-             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> A lista está vazia.`;
+             filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> A lista está vazia (Filtro Rígido).`;
         } else {
-             filterMessage.innerHTML = `Listando todos os ${candidatesWithScore.length} itens S/T com similaridade de nome (> 0.3).`;
+             // Caso a planilha não tenha Localização, mostra todos os que têm boa similaridade de nome
+             filterMessage.innerHTML = `Localização da planilha não especificada. Listando todos os ${candidatesWithScore.length} itens S/T com similaridade de nome (> 0.3).`;
         }
     }
 
@@ -1239,9 +1240,9 @@ export function setupImportacaoListeners(reloadDataCallback) {
                         changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
                     }
                     // Adiciona a Origem da Doação (REGRA DO USUÁRIO)
-                    if (fieldUpdates['Origem da Doação']) { // Mesmo se não tiver checkbox, forçamos a atualização se vier do manual link
+                    // if (fieldUpdates['Origem da Doação']) { // Mesmo se não tiver checkbox, forçamos a atualização se vier do manual link
                          changes['Origem da Doação'] = extractOrigemDoacao(pastedItem);
-                    }
+                    // }
                     // Verifica a flag de ligação manual para forçar a atualização da descrição
                     if (fieldUpdates.Descrição || updateDescription) {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
