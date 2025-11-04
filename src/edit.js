@@ -234,7 +234,7 @@ async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
     const giapItem = giapMapAllItems.get(tombo);
     if (!giapItem) return;
 
-    showOverlay('Sincronizando item...');
+    showOverlay('Sincronizando item...'); // Inicia o overlay
     
     const item = patrimonioFullList.find(i => i.id === id);
     
@@ -259,7 +259,7 @@ async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
     }
     
     try {
-        // 1. Atualiza no Firestore
+        // 1. Atualiza no Firestore (salva no banco de dados)
         await updateDoc(doc(db, 'patrimonio', id), changes);
         
         // 2. Atualiza o estado global (patrimonioFullList) e o cache imediatamente
@@ -275,8 +275,11 @@ async function confirmSyncAction(id, tombo, updateDesc, currentDesc) {
         
         showNotification('Item sincronizado com sucesso!', 'success');
         
+        // CORREÇÃO ESSENCIAL: Esconde o overlay após o sucesso
+        hideOverlay(); 
+        
     } catch (e) {
-        hideOverlay();
+        hideOverlay(); // Chamado no caso de falha
         showNotification('Erro ao sincronizar item.', 'error');
         console.error(e);
     }
