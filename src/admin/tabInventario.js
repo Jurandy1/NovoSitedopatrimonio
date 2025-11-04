@@ -1,4 +1,4 @@
-/**
+/**/**
  * /src/admin/tabInventario.js
  * Lógica da aba "Inventário Editável" (content-edicao).
  */
@@ -290,13 +290,16 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
     // Listener para ações da tabela (botões e checkboxes)
     DOM_EDIT_INV.editTableBody.addEventListener('click', async (e) => {
         const { patrimonioFullList } = getState(); // Pega a lista para ações
-        const target = e.target;
-        const id = target.dataset.id;
-        
-        if (target.classList.contains('row-checkbox')) {
-            updateDeleteButtonState();
+        const target = e.target.closest('button'); // Garante que estamos pegando o botão
+        if (!target) {
+            // Se o clique não foi em um botão, pode ter sido no checkbox
+            if (e.target.classList.contains('row-checkbox')) {
+                updateDeleteButtonState();
+            }
             return;
         }
+        
+        const id = target.dataset.id;
 
         if (target.classList.contains('save-row-btn')) {
             if (!id || !dirtyItems.has(id)) {
@@ -313,6 +316,17 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                 const itemRef = doc(db, 'patrimonio', id);
                 await updateDoc(itemRef, { ...changes, updatedAt: serverT() });
                 document.getElementById(`row-${id}`).classList.remove('is-dirty');
+
+                // ATUALIZAÇÃO: Atualiza o estado local e o cache
+                const item = patrimonioFullList.find(i => i.id === id);
+                const updatedItem = { ...item, ...changes };
+                const index = patrimonioFullList.findIndex(i => i.id === id);
+                if(index > -1) {
+                    patrimonioFullList[index] = updatedItem;
+                    setState({ patrimonioFullList }); 
+                }
+                await idb.patrimonio.put(updatedItem); 
+
                 showNotification('Item salvo com sucesso!', 'success');
             } catch (error) {
                 console.error("Erro ao salvar item:", error);
@@ -333,11 +347,57 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
             return;
         }
         
+        // INÍCIO DA ALTERAÇÃO: Lógica de salvar-antes-de-sincronizar
         if (target.classList.contains('sync-giap-btn')) {
             if (!id) return;
-            const item = patrimonioFullList.find(i => i.id === id);
+
+            // 1. Pega o item original do estado
+            let item = patrimonioFullList.find(i => i.id === id);
+            if (!item) return;
+
+            // 2. Verifica se o item está "sujo" (tem alterações pendentes)
+            if (dirtyItems.has(id)) {
+                showOverlay('Salvando alterações pendentes antes de sincronizar...');
+                const changes = dirtyItems.get(id);
+                
+                try {
+                    // 3. Salva as alterações pendentes PRIMEIRO
+                    const itemRef = doc(db, 'patrimonio', id);
+                    await updateDoc(itemRef, { ...changes, updatedAt: serverT() });
+                    
+                    // 4. Limpa o "sujo" e atualiza o item local
+                    dirtyItems.delete(id);
+                    document.getElementById(`row-${id}`).classList.remove('is-dirty');
+                    DOM_EDIT_INV.saveAllChangesBtn.disabled = dirtyItems.size === 0;
+
+                    // 5. Atualiza o objeto 'item' em memória com as novas alterações
+                    item = { ...item, ...changes };
+                    
+                    // 6. Atualiza o estado global (patrimonioFullList)
+                    const globalPatrimonioList = getState().patrimonioFullList;
+                    const index = globalPatrimonioList.findIndex(i => i.id === id);
+                    if(index > -1) {
+                        globalPatrimonioList[index] = item;
+                        setState({ patrimonioFullList: globalPatrimonioList }); // Atualiza o estado
+                    }
+                    
+                    await idb.patrimonio.put(item); // Atualiza o cache IDB
+
+                    showNotification('Item salvo! Sincronizando...', 'success');
+                    hideOverlay();
+
+                } catch (error) {
+                    hideOverlay();
+                    console.error("Erro ao salvar item antes de sincronizar:", error);
+                    showNotification('Erro ao salvar item. A sincronização foi cancelada.', 'error');
+                    return; // Cancela a sincronização se o save falhar
+                }
+            }
+
+            // 7. Prossiga com a sincronização (agora com o item salvo e atualizado)
             openSyncModalCallback(item);
         }
+        // FIM DA ALTERAÇÃO
     });
 
     // INÍCIO DA ALTERAÇÃO: Listeners para o novo modal "Adicionar Item"
@@ -404,7 +464,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
                 showNotification('Item adicionado com sucesso! Atualizando...', 'success');
                 
                 // 4. Recarrega todos os dados
-                reloadDataCallback(); 
+                reloadDataCallback(true); // Força um reload completo
 
             } catch (error) {
                 console.error("Erro ao adicionar item:", error);
@@ -456,7 +516,7 @@ export function setupInventarioListeners(reloadDataCallback, openSyncModalCallba
         }
         
         // Após a exclusão, recarrega os dados via orquestrador
-        reloadDataCallback(); 
+        reloadDataCallback(true); // Força um reload completo
     });
     
     // Fechar Modal
