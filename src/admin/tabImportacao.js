@@ -1,19 +1,21 @@
 /**
  * /src/admin/tabImportacao.js
  * Lógica da aba "Importação e Substituição" (content-importacao).
- * * Lógica principal atualizada: Focar em ligar TOMBO da planilha com S/T do sistema 
- * através de Match RÍGIDO (Local + Estado + Nome Similar). 
- * Qualquer falha resulta em "Criar Novo Item".
+ * * ATUALIZAÇÃO: A funcionalidade principal ("Editar por Descrição") foi simplificada.
+ * Removemos a seleção multi-unidade e a substituição total.
+ * O fluxo agora é:
+ * 1. Usuário seleciona TIPO e UNIDADE de destino.
+ * 2. Usuário cola a planilha (que pode ter qualquer nome de unidade, será ignorado).
+ * 3. O sistema compara os itens colados com os itens da UNIDADE SELECIONADA.
+ * 4. O usuário atualiza item por item na tela de comparação.
  */
 
-// INÍCIO DA ALTERAÇÃO: Importa 'updateDoc' e a função de similaridade
+// Importa 'updateDoc' e a função de similaridade
 import { db, serverT, writeBatch, doc, collection, setDoc, addDoc, getDocs, query, where, deleteDoc, updateDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
-// INÍCIO DA ALTERAÇÃO: Adiciona 'debounce'
 import { showNotification, showOverlay, hideOverlay, normalizeStr, escapeHtml, normalizeTombo, debounce, parseEstadoEOrigem } from '../utils/helpers.js';
 import { calculateSimilarity } from '../utils/similarity.js'; // Importa a função de similaridade
 import { idb } from '../services/cache.js';
-// FIM DA ALTERAÇÃO
 
 /**
  * Normaliza strings de estado de conservação para os padrões do sistema.
@@ -36,7 +38,6 @@ const normalizeEstadoConservacao = (estadoStr) => {
 };
 
 /**
- * INÍCIO: Adiciona função para extrair origem da doação
  * Extrai informação de doação de colunas da planilha
  * @param {object} item - O objeto da linha (com cabeçalhos normalizados)
  * @returns {string} - O texto da origem da doação, se encontrado.
@@ -64,45 +65,40 @@ const extractOrigemDoacao = (item) => {
 
     return ''; // Nenhum encontrado
 };
-// FIM: Adiciona função
 
-// INÍCIO DA ALTERAÇÃO: Estado local para a importação multi-unidade
-let multiUnitImportData = {
+// Estado local para a importação
+let importData = {
     pasted: [], // Todos os itens colados
-    unitMap: new Map(), // Mapeamento: "Unidade Colada" -> "Unidade Sistema"
+    selectedUnitName: null, // A unidade de destino selecionada
     fieldUpdates: {}, // Campos a atualizar: { Tombamento: true, ... }
     comparisonData: [], // Dados de comparação item-a-item
     stItemsInManualLinkPool: new Map(), // Pool de itens S/T do sistema disponíveis para ligação manual
 };
-// INÍCIO DA ALTERAÇÃO: Adiciona estado para o modal de ligação manual
-let selPastedItemIndex = null; // Rastreia qual item "Não Encontrado" está sendo ligado
-// FIM DA ALTERAÇÃO
+
+// Rastreia qual item "Não Encontrado" está sendo ligado
+let selPastedItemIndex = null; 
 
 const DOM_IMPORT = {
     // Nav
     subTabNav: document.querySelectorAll('#content-importacao .sub-nav-btn'),
 
-    // Substituir
-    replaceTipo: document.getElementById('replace-tipo'),
-    replaceUnit: document.getElementById('replace-unit'),
-    replaceData: document.getElementById('replace-data'),
-    previewReplaceBtn: document.getElementById('preview-replace-btn'),
-    replaceResults: document.getElementById('replace-results'),
-    replacePreviewList: document.getElementById('replace-preview-list'),
-    replaceConfirmCheckbox: document.getElementById('replace-confirm-checkbox'),
-    confirmReplaceBtn: document.getElementById('confirm-replace-btn'),
+    // Substituir (Oculto, mas IDs podem ser referenciados)
+    // replaceTipo: document.getElementById('replace-tipo'),
+    // replaceUnit: document.getElementById('replace-unit'),
     
-    // Editar por Descrição
-    // INÍCIO DA ALTERAÇÃO: Remove selects de tipo/unidade, adiciona container de campos
+    // Editar por Descrição (Agora "Importar e Atualizar Unidade")
+    importTipo: document.getElementById('import-tipo'),
+    importUnit: document.getElementById('import-unit'),
     editByDescFields: document.getElementById('edit-by-desc-fields'),
-    // FIM DA ALTERAÇÃO
     editByDescData: document.getElementById('edit-by-desc-data'),
-    previewEditByDescBtn: document.getElementById('preview-edit-by-desc-btn'),
-    // INÍCIO DA ALTERAÇÃO: Adiciona novos containers de UI
-    editByDescUnitMatching: document.getElementById('edit-by-desc-unit-matching'),
-    editByDescUnitTableContainer: document.getElementById('edit-by-desc-unit-table-container'),
-    confirmUnitMappingBtn: document.getElementById('confirm-unit-mapping-btn'),
-    // FIM DA ALTERAÇÃO
+    previewEditByDescBtn: document.getElementById('preview-compare-btn'), // ID Alterado no HTML
+    
+    // Seção de Mapeamento de Unidade (Removida do fluxo)
+    // editByDescUnitMatching: document.getElementById('edit-by-desc-unit-matching'),
+    // editByDescUnitTableContainer: document.getElementById('edit-by-desc-unit-table-container'),
+    // confirmUnitMappingBtn: document.getElementById('confirm-unit-mapping-btn'),
+    
+    // Resultados da Comparação (Mantido)
     editByDescResults: document.getElementById('edit-by-desc-results'),
     editByDescPreviewTableContainer: document.getElementById('edit-by-desc-preview-table-container'),
     confirmEditByDescBtn: document.getElementById('confirm-edit-by-desc-btn'),
@@ -110,11 +106,9 @@ const DOM_IMPORT = {
     editByDescBulkAction: document.getElementById('edit-by-desc-bulk-action'),
     editByDescBulkApply: document.getElementById('edit-by-desc-bulk-apply'),
     editByDescSummary: document.getElementById('edit-by-desc-summary'),
-    // INÍCIO DA ALTERAÇÃO: Novo Filtro de Ação
     editByDescActionFilter: document.getElementById('edit-by-desc-action-filter'),
-    // FIM DA ALTERAÇÃO
     
-    // Importar em Massa
+    // Importar em Massa (Mantido)
     massTransferTombos: document.getElementById('mass-transfer-tombos'),
     massTransferTipo: document.getElementById('mass-transfer-tipo'),
     massTransferUnit: document.getElementById('mass-transfer-unit'),
@@ -124,19 +118,18 @@ const DOM_IMPORT = {
     massTransferConfirmBtn: document.getElementById('mass-transfer-confirm-btn'),
     massTransferSetAllStatus: document.getElementById('mass-transfer-set-all-status'),
 
-    // Adicionar GIAP Customizada
+    // Adicionar GIAP Customizada (Mantido)
     addGiapNumber: document.getElementById('add-giap-number'),
     addGiapName: document.getElementById('add-giap-name'),
     saveGiapUnitBtn: document.getElementById('save-giap-unit-btn'),
 
-    // INÍCIO DA ALTERAÇÃO: IDs do novo Modal de Ligação Manual
+    // IDs do novo Modal de Ligação Manual (Mantido)
     manualLinkModal: document.getElementById('manual-link-modal'),
     manualLinkPastedItem: document.getElementById('manual-link-pasted-item'),
     manualLinkUnitName: document.getElementById('manual-link-unit-name'),
     manualLinkSystemItemSelect: document.getElementById('manual-link-system-item-select'),
     manualLinkUpdateDesc: document.getElementById('manual-link-update-desc'),
     manualLinkConfirmBtn: document.getElementById('manual-link-confirm-btn'),
-    // FIM DA ALTERAÇÃO
 };
 
 /**
@@ -157,8 +150,8 @@ export function populateImportAndReplaceTab() {
     
     const selects = [
         DOM_IMPORT.massTransferTipo,
-        DOM_IMPORT.replaceTipo,
-        // DOM_IMPORT.editByDescTipo // Removido
+        // DOM_IMPORT.replaceTipo, // Removido do fluxo
+        DOM_IMPORT.importTipo // Adicionado
     ];
 
     selects.forEach(select => {
@@ -172,9 +165,7 @@ export function populateImportAndReplaceTab() {
  * @param {string} unitSelectId - ID do select de Unidade.
  */
 function setupUnitSelect(tipoSelectEl, unitSelectEl) {
-    // *** CORREÇÃO: patrimonioFullList removido deste escopo ***
     tipoSelectEl.addEventListener('change', () => {
-        // *** CORREÇÃO: patrimonioFullList é obtido de getState() AQUI DENTRO ***
         const { patrimonioFullList } = getState();
         const selectedTipo = tipoSelectEl.value;
         if (!selectedTipo) {
@@ -196,113 +187,42 @@ function setupUnitSelect(tipoSelectEl, unitSelectEl) {
     });
 }
 
-// --- INÍCIO DA ALTERAÇÃO: Funções da Lógica "Editar por Descrição" ---
+// --- Funções da Lógica "Importar e Atualizar Unidade" ---
 
 /**
- * ETAPA 1: Renderiza a UI de Mapeamento de Unidades.
- * @param {Map<string, string>} unitsToMatch - Mapa de "unidade colada" -> "melhor palpite do sistema".
+ * ETAPA 1 (Simplificada): Processa o mapeamento de unidades e prepara os dados de comparação de itens.
+ * Esta função é chamada diretamente pelo botão "Comparar".
  */
-function renderUnitMatchingUI(unitsToMatch) {
-    const { normalizedSystemUnits } = getState();
-    const systemUnits = [...normalizedSystemUnits.values()].sort();
-    
-    const systemUnitOptions = `<option value="">-- Ignorar Unidade --</option>` + 
-                              systemUnits.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
-
-    let tableHtml = `
-        <table class="w-full text-sm">
-            <thead class="bg-slate-200">
-                <tr>
-                    <th class="p-2 text-left">Unidade na Planilha (Colada)</th>
-                    <th class="p-2 text-left">Unidade Correspondente no Sistema</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-    
-    // INÍCIO DA CORREÇÃO DE BUG: Filtrar o item "unidade"
-    unitsToMatch.forEach((bestMatch, pastedUnit) => {
-        if (normalizeStr(pastedUnit) === 'unidade') return; // Ignora o próprio cabeçalho
-
-        tableHtml += `
-            <tr class="border-b" data-pasted-unit="${escapeHtml(pastedUnit)}">
-                <td class="p-2 font-medium">${escapeHtml(pastedUnit)}</td>
-                <td class="p-2">
-                    <select class="unit-mapping-select w-full p-2 border rounded-lg bg-white">
-                        ${systemUnitOptions}
-                    </select>
-                </td>
-            </tr>
-        `;
-    });
-    // FIM DA CORREÇÃO DE BUG
-    
-    tableHtml += `</tbody></table>`;
-    DOM_IMPORT.editByDescUnitTableContainer.innerHTML = tableHtml;
-
-    // Pré-seleciona a melhor correspondência encontrada
-    unitsToMatch.forEach((bestMatch, pastedUnit) => {
-        const select = DOM_IMPORT.editByDescUnitTableContainer.querySelector(`tr[data-pasted-unit="${escapeHtml(pastedUnit)}"] select`);
-        if (select && bestMatch) {
-            select.value = bestMatch;
-        }
-    });
-
-    // Mostra a etapa 2 e esconde a 3
-    DOM_IMPORT.editByDescUnitMatching.classList.remove('hidden');
-    DOM_IMPORT.editByDescResults.classList.add('hidden');
-}
-
-
-/**
- * ETAPA 2: Processa o mapeamento de unidades e prepara os dados de comparação de itens.
- */
-function processUnitMappingAndLoadItems() {
+function processAndLoadItems() {
     const { patrimonioFullList } = getState();
     
-    // 1. Lê o mapeamento final da UI
-    multiUnitImportData.unitMap.clear();
-    const mappingRows = DOM_IMPORT.editByDescUnitTableContainer.querySelectorAll('tr[data-pasted-unit]');
-    mappingRows.forEach(row => {
-        const pastedUnit = row.dataset.pastedUnit;
-        const selectedSystemUnit = row.querySelector('.unit-mapping-select').value;
-        if (pastedUnit && selectedSystemUnit) {
-            multiUnitImportData.unitMap.set(pastedUnit, selectedSystemUnit);
-        }
-    });
-
-    if (multiUnitImportData.unitMap.size === 0) {
-        showNotification('Nenhuma unidade foi mapeada. Processo interrompido.', 'warning');
+    // 1. Lê a unidade selecionada (fluxo simplificado)
+    const selectedSystemUnit = DOM_IMPORT.importUnit.value;
+    if (!selectedSystemUnit) {
+        showNotification('Nenhuma unidade de destino foi selecionada.', 'warning');
         return;
     }
 
     // 2. Prepara os dados de comparação e o pool de S/T para ligação manual
-    multiUnitImportData.comparisonData = [];
-    multiUnitImportData.stItemsInManualLinkPool.clear(); // Limpa o pool de S/T
+    importData.comparisonData = [];
+    importData.stItemsInManualLinkPool.clear(); // Limpa o pool de S/T
 
     // Agrupa os itens do sistema por unidade para performance e prepara o pool S/T
-    const systemItemsByUnit = new Map();
-    multiUnitImportData.unitMap.forEach(systemUnit => {
-        if (!systemItemsByUnit.has(systemUnit)) {
-            const items = [...patrimonioFullList.filter(i => normalizeStr(i.Unidade) === normalizeStr(systemUnit))];
-            systemItemsByUnit.set(systemUnit, items);
+    const systemItemsInUnit = [...patrimonioFullList.filter(i => normalizeStr(i.Unidade) === normalizeStr(selectedSystemUnit))];
 
-            // Preenche o pool S/T para ligação manual para esta unidade (REGRA 3)
-            const stItems = items.filter(i => {
-                const tombo = normalizeTombo(i.Tombamento);
-                const isNoTombo = (tombo === 's/t' || tombo === '');
-                const isNotPermuta = !i.isPermuta;
-                return isNoTombo && isNotPermuta;
-            });
-            multiUnitImportData.stItemsInManualLinkPool.set(systemUnit, stItems);
-        }
+    // Preenche o pool S/T para ligação manual para esta unidade (REGRA 3)
+    const stItems = systemItemsInUnit.filter(i => {
+        const tombo = normalizeTombo(i.Tombamento);
+        const isNoTombo = (tombo === 's/t' || tombo === '');
+        const isNotPermuta = !i.isPermuta;
+        return isNoTombo && isNotPermuta;
     });
-
+    importData.stItemsInManualLinkPool.set(selectedSystemUnit, stItems);
+    importData.selectedUnitName = selectedSystemUnit;
+    
     // 3. Itera sobre os itens colados e encontra correspondências
-    multiUnitImportData.pasted.forEach(pastedItem => {
-        const pastedUnitName = pastedItem.unidade || '';
-        const systemUnitName = multiUnitImportData.unitMap.get(pastedUnitName);
-
+    importData.pasted.forEach(pastedItem => {
+        
         // --- FILTRO DE ENTRADA RÍGIDO (REGRA DE NEGÓCIO) ---
         const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo || '');
 
@@ -311,18 +231,9 @@ function processUnitMappingAndLoadItems() {
              return; 
         }
 
-        // 2. Descarta se a unidade não foi mapeada ou foi ignorada
-        if (!systemUnitName) {
-            return;
-        }
-
-        let itemsPool = systemItemsByUnit.get(systemUnitName);
-        if (!itemsPool) {
-            return;
-        }
-        
         // Passa a "piscina" de itens para o findBestMatch
-        const { match, score, reason } = findBestMatch(pastedItem, itemsPool);
+        // Usamos a cópia 'systemItemsInUnit' que pode ser modificada
+        const { match, score, reason } = findBestMatch(pastedItem, systemItemsInUnit);
         
         // --- FILTRO DE SAÍDA RÍGIDO (REQUISITO) ---
         
@@ -338,43 +249,41 @@ function processUnitMappingAndLoadItems() {
                 pastedItem, 
                 bestMatch: null, 
                 score: 0, 
-                systemUnitName, 
+                systemUnitName: selectedSystemUnit, 
                 updateDescription: false,
                 initialAction: 'create_new' // Adiciona a ação inicial
             };
-            multiUnitImportData.comparisonData.push(comparisonRow);
+            importData.comparisonData.push(comparisonRow);
         } else if (match !== null) {
              // Caso Match Forte (Verde) - Permite passar para ação de atualização
-            const matchIndex = itemsPool.findIndex(item => item.id === match.id);
+            const matchIndex = systemItemsInUnit.findIndex(item => item.id === match.id);
             if (matchIndex > -1) {
                 // Remove o item encontrado para não ser usado em outro match da planilha
-                itemsPool.splice(matchIndex, 1);
+                systemItemsInUnit.splice(matchIndex, 1);
             }
             
             const comparisonRow = { 
                 pastedItem, 
                 bestMatch: match, 
                 score, 
-                systemUnitName, 
+                systemUnitName: selectedSystemUnit, 
                 updateDescription: false,
                 initialAction: 'update' // Adiciona a ação inicial
             };
-            multiUnitImportData.comparisonData.push(comparisonRow);
+            importData.comparisonData.push(comparisonRow);
         }
         // Qualquer outro caso (Match fraco, falha no filtro rigoroso) é descartado para "lista limpa".
     });
 
-    // 4. Renderiza a tabela de revisão de itens (Etapa 3)
-    renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+    // 4. Renderiza a tabela de revisão de itens (Etapa 2)
+    renderEditByDescPreview(importData.comparisonData, importData.fieldUpdates);
     
-    // Mostra a etapa 3 e esconde a 2
+    // Mostra a etapa 2
     DOM_IMPORT.editByDescResults.classList.remove('hidden');
-    DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
-    document.getElementById('edit-by-desc-preview-count').textContent = multiUnitImportData.comparisonData.length;
+    document.getElementById('edit-by-desc-preview-count').textContent = importData.comparisonData.length;
 }
 
 
-// INÍCIO DA ALTERAÇÃO: Lógica de match focada em Tombo Exato OU Match Rígido (S/T)
 /**
  * Encontra a melhor correspondência para a planilha: Tombo Exato OU Match Rígido (S/T).
  */
@@ -431,25 +340,20 @@ function findBestMatch(pastedItem, itemsPool) {
     // Se não achou por Tombo Exato E não achou por Match Rígido em S/T.
     return { match: null, score: 0, reason: 'Tombo Não Encontrado no Sistema' };
 }
-// FIM DA ALTERAÇÃO
 
 
 /**
- * Renderiza a tabela de comparação para "Editar por Descrição". (Req B)
+ * Renderiza a tabela de comparação para "Importar e Atualizar Unidade".
  * @param {Array<object>} comparisonData - Dados processados da comparação.
  * @param {object} fieldUpdates - Objeto {Tombamento: true, ...}
  */
-// INÍCIO DA ALTERAÇÃO: Função reescrita para (Req 1, 2, 3)
 function renderEditByDescPreview(comparisonData, fieldUpdates) {
     const container = DOM_IMPORT.editByDescPreviewTableContainer;
     container.innerHTML = ''; // Limpa o container
 
-    // (Req 1) Agrupa os dados por unidade do sistema
+    // (Req 1) Agrupa os dados por unidade do sistema (agora será apenas uma)
     const groupedByUnit = comparisonData.reduce((acc, row) => {
-        // *** NOVO: Adiciona a ação final baseada no initialAction (usada no filtro)
-        // Se a ação final não foi definida (ex: após ligação manual), usa a inicial.
         row.finalAction = row.finalAction || (row.bestMatch ? 'update' : 'create_new');
-        // *** FIM NOVO ***
         
         const unitName = row.systemUnitName || 'Unidade Inválida';
         if (!acc[unitName]) {
@@ -467,14 +371,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         
         // Filtra os itens por unidade antes de renderizar
         const filteredItems = items.filter(row => {
-            // Se o item foi ligado manualmente (bestMatch existe), ele vira 'update'
             const currentAction = row.bestMatch && row.finalAction === 'create_new' ? 'update' : row.finalAction;
 
             if (actionFilter === 'all') return true;
             
-            // Lógica para o filtro 'Manual'
             if (actionFilter === 'manual') {
-                 // Um item é 'manual' se a ação final for 'create_new' E ele não tem match (bestMatch: null)
                  return currentAction === 'create_new' && row.bestMatch === null;
             }
             
@@ -483,12 +384,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
         if (filteredItems.length === 0) return; // Se a unidade não tem itens com o filtro, não renderiza
 
+        // Remove a 'details' e 'summary' pois agora é só uma unidade
         html += `
-            <details open class="unit-group-details mb-4 border rounded-lg shadow-sm bg-white" data-unit-name="${escapeHtml(systemUnitName)}">
-                <summary class="p-3 font-bold text-lg bg-slate-100 cursor-pointer rounded-t-lg flex justify-between items-center hover:bg-slate-200">
-                    <span>Unidade: ${escapeHtml(systemUnitName)}</span>
-                    <span class="text-sm font-normal bg-blue-100 text-blue-700 px-3 py-1 rounded-full">${filteredItems.length} itens</span>
-                </summary>
                 <div class="p-2 overflow-x-auto">
                     <table class="w-full text-sm min-w-[900px]">
                         <thead class="bg-slate-50">
@@ -504,11 +401,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
 
         // Itera sobre os itens *dentro* de cada unidade
         filteredItems.forEach((row) => {
-            // Encontra o índice global do item para o data-row-index
             const index = comparisonData.indexOf(row);
             const { pastedItem, bestMatch, score, systemUnitName, finalAction } = row;
-            
-            // Determina a ação atual para a renderização do select
             const currentRenderAction = bestMatch ? 'update' : finalAction;
 
             // --- Dados da Planilha ---
@@ -519,14 +413,22 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             const { estado: pastedEstado, origem: pastedOrigem } = parseEstadoEOrigem(pastedEstadoInput);
             const pastedObs = escapeHtml(pastedItem.observacao || pastedItem.obs || '');
 
-            // (Req 3) Lógica de exibição corrigida (não mostra mais "Ignorado")
-            const descHtml = fieldUpdates.Descrição ? `<span class="text-red-600 font-bold">${pastedDesc} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedDesc} (IGNORAR)</span>`;
-            // Não deve ter atualização de Tombamento se for Tombo Exato - Limpo, mas o filtro já está na entrada agora.
-            const tomboHtml = fieldUpdates.Tombamento ? `<span class="text-red-600 font-bold">${pastedTombo} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedTombo} (IGNORAR)</span>`;
-            const localHtml = fieldUpdates.Localização ? `<span class="text-red-600 font-bold">${pastedLocal} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedLocal} (IGNORAR)</span>`;
-            const estadoHtml = fieldUpdates.Estado ? `<span class="text-red-600 font-bold">${pastedEstado} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedEstado} (IGNORAR)</span>`;
-            const obsHtml = fieldUpdates.Observação ? `<span class="text-red-600 font-bold">${pastedObs || '...'} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedObs || '...'} (IGNORAR)</span>`;
-            const origemHtml = `<p><strong>Origem (Auto):</strong> <span class="text-blue-600 font-medium">${escapeHtml(pastedOrigem || 'N/D')}</span></p>`;
+            // Define quais campos serão atualizados (agora hardcoded para o fluxo desejado)
+            const fieldsToUpdate = {
+                Descrição: true,
+                Tombamento: true,
+                Localização: true,
+                Estado: true,
+                Observação: true,
+                Origem: true // Origem da Doação
+            };
+
+            const descHtml = fieldsToUpdate.Descrição ? `<span class="text-red-600 font-bold">${pastedDesc} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedDesc} (IGNORAR)</span>`;
+            const tomboHtml = fieldsToUpdate.Tombamento ? `<span class="text-red-600 font-bold">${pastedTombo} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedTombo} (IGNORAR)</span>`;
+            const localHtml = fieldsToUpdate.Localização ? `<span class="text-red-600 font-bold">${pastedLocal} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedLocal} (IGNORAR)</span>`;
+            const estadoHtml = fieldsToUpdate.Estado ? `<span class="text-red-600 font-bold">${pastedEstado} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedEstado} (IGNORAR)</span>`;
+            const obsHtml = fieldsToUpdate.Observação ? `<span class="text-red-600 font-bold">${pastedObs || '...'} (ATUALIZAR)</span>` : `<span class="text-slate-500">${pastedObs || '...'} (IGNORAR)</span>`;
+            const origemHtml = fieldsToUpdate.Origem ? `<p><strong>Origem (Auto):</strong> <span class="text-red-600 font-bold">${escapeHtml(pastedOrigem || 'N/D')} (ATUALIZAR)</span></p>` : `<p><strong>Origem (Auto):</strong> <span class="text-slate-500">${escapeHtml(pastedOrigem || 'N/D')} (IGNORAR)</span></p>`;
 
 
             let planilhaHtml = `
@@ -550,7 +452,6 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 // Correspondência Forte (Verde - Score 1.0 ou 0.95)
                 rowClass = 'bg-green-50';
                 
-                // MENSAGEM: Indica se foi por Tombo Exato ou Match Rígido (S/T)
                 const matchReason = score >= 1.0 ? 'Tombo Exato' : 'Match Rigoroso (S/T)';
                 const systemOrigem = bestMatch['Origem da Doação'] || 'N/D';
                 
@@ -564,7 +465,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 `;
                 actionHtml = `
                     <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
-                        <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos Marcados</option>
+                        <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos</option>
                         <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
                     </select>
                 `;
@@ -574,14 +475,12 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
-                // Ação Manual/Criar Novo
                 actionHtml = `
                     <div class="space-y-1">
                         <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}" data-row-index="${index}">
                             <option value="create_new" ${currentRenderAction === 'create_new' ? 'selected' : ''}>Criar Novo Item (Sobrando)</option>
                             <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar Linha</option>
                         </select>
-                        <!-- BOTÃO DE LIGAÇÃO MANUAL -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
                     </div>
                 `;
@@ -597,7 +496,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             `;
         });
 
-        html += `</tbody></table></div></details>`;
+        html += `</tbody></table></div>`;
     });
 
     container.innerHTML = html;
@@ -607,29 +506,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
     // Re-adiciona listener para o filtro de ação
     DOM_IMPORT.editByDescActionFilter.addEventListener('change', debounce(() => renderEditByDescPreview(comparisonData, fieldUpdates), 50));
 }
-// FIM DA ALTERAÇÃO
 
 /**
  * Atualiza o sumário de ações com base nas seleções atuais.
  */
-// INÍCIO DA ALTERAÇÃO: Lógica de contagem atualizada (Req 2)
 function updateEditByDescSummary() {
-    const selects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
-    
-    let toUpdateCount = 0;
-    let toIgnoreCount = 0;
-    let toCreateCount = 0;
-    let manualCount = 0;
-
-    // O sumário agora se baseia no `finalAction` que está armazenado no `comparisonData`
-    multiUnitImportData.comparisonData.forEach(row => {
-        if (row.finalAction === 'update') toUpdateCount++;
-        else if (row.finalAction === 'ignore') toIgnoreCount++;
-        else if (row.finalAction === 'create_new' && row.bestMatch === null) manualCount++; // Manual é um "criar novo" que ainda não foi ligado
-        else if (row.finalAction === 'create_new' && row.bestMatch !== null) toCreateCount++; // Se tiver bestMatch (ligado manualmente), é um "criar novo" que virou "atualizar"
-    });
-    
-    // Recalcula o count para o sumário, baseado nas ações atuais do select na UI
     let uiUpdateCount = 0;
     let uiCreateCount = 0;
     let uiIgnoreCount = 0;
@@ -640,9 +521,8 @@ function updateEditByDescSummary() {
         const action = select ? select.value : null;
         const rowIndex = parseInt(rowEl.dataset.rowIndex, 10);
         
-        const rowData = multiUnitImportData.comparisonData[rowIndex];
+        const rowData = importData.comparisonData[rowIndex];
         
-        // Se a ação for 'create_new' E não houver bestMatch, consideramos "MANUAL" (criação pendente de ligação)
         const isManual = (action === 'create_new' && rowData && rowData.bestMatch === null); 
 
         if (action === 'update') uiUpdateCount++;
@@ -653,24 +533,19 @@ function updateEditByDescSummary() {
         }
     });
     
-    // Usa o count da UI para o texto, mas a lógica de confirmação usa o estado final no `comparisonData`
     DOM_IMPORT.editByDescSummary.textContent = 
         `${uiUpdateCount} para ATUALIZAR, ${uiCreateCount} para CRIAR, ${uiIgnoreCount} para IGNORAR, ${uiManualCount} MANUAIS.`;
     
-    // O botão só fica desabilitado se a soma das ações não for maior que zero
     DOM_IMPORT.confirmEditByDescBtn.disabled = (uiUpdateCount + uiCreateCount + uiManualCount) === 0;
 }
-// FIM DA ALTERAÇÃO
 
-// INÍCIO DA ALTERAÇÃO: (Req 2) Funções para o Modal de Ligação Manual (MODIFICADA PARA INCLUIR ESTADO E LOCAL)
 /**
  * Abre o modal para ligar manualmente um item "Não Encontrado".
- * @param {number} rowIndex - O índice do item em `multiUnitImportData.comparisonData`.
+ * @param {number} rowIndex - O índice do item em `importData.comparisonData`.
  */
 function openManualLinkModal(rowIndex) {
     selPastedItemIndex = rowIndex; // Armazena o índice
-    const { patrimonioFullList } = getState();
-    const { pastedItem, systemUnitName } = multiUnitImportData.comparisonData[rowIndex];
+    const { pastedItem, systemUnitName } = importData.comparisonData[rowIndex];
 
     const pastedLocalInput = pastedItem.local || pastedItem.localizacao || '';
     const pastedLocal = normalizeStr(pastedLocalInput);
@@ -696,7 +571,7 @@ function openManualLinkModal(rowIndex) {
     // --- LÓGICA DE FILTRAGEM RÍGIDA E PONTUAÇÃO (REGRA DO USUÁRIO) ---
     
     // Pool completo de S/T para a unidade (já exclui itens com tombo e permuta)
-    const allStCandidatesPool = multiUnitImportData.stItemsInManualLinkPool.get(systemUnitName) || [];
+    const allStCandidatesPool = importData.stItemsInManualLinkPool.get(systemUnitName) || [];
     
     let systemItems = allStCandidatesPool;
     let locationMatch = false;
@@ -706,7 +581,6 @@ function openManualLinkModal(rowIndex) {
         const filteredByLocation = allStCandidatesPool.filter(item => 
             normalizeStr(item.Localização) === pastedLocal
         );
-        // O filtro rígido: Se o local for especificado na planilha, a lista de sugestões SÓ PODE ter itens desse local.
         systemItems = filteredByLocation;
         locationMatch = filteredByLocation.length > 0;
     } 
@@ -718,7 +592,6 @@ function openManualLinkModal(rowIndex) {
         const systemDesc = normalizeStr(item.Descrição);
         const score = calculateSimilarity(pastedDesc, systemDesc);
         
-        // 3. Aplica o filtro de Similaridade Mínima (> 0.3)
         if (score < 0.3) return null; 
 
         return {
@@ -737,10 +610,8 @@ function openManualLinkModal(rowIndex) {
             const systemOrigem = item['Origem da Doação'] || 'N/D';
             const itemOrigem = systemOrigem.length > 20 ? systemOrigem.substring(0, 17) + '...' : systemOrigem;
             
-            // Verifica o estado para destaque
             const systemEstado = normalizeEstadoConservacao(item.Estado || 'Regular');
-            const estadoHighlight = systemEstado === pastedEstado ? 'text-green-600' : 'text-red-600';
-
+            
             return `
                 <option value="${item.id}" data-score="${score.toFixed(2)}">
                     [Score: ${score.toFixed(2)}] ${escapeHtml(item.Descrição)} 
@@ -759,7 +630,6 @@ function openManualLinkModal(rowIndex) {
         } else if (pastedLocal && !locationMatch) {
              filterMessage.innerHTML = `<span class="font-semibold text-red-700">Nenhum item S/T encontrado no local ${pastedLocalDisplay}.</span> A lista está vazia (Filtro Rígido).`;
         } else {
-             // Caso a planilha não tenha Localização, mostra todos os que têm boa similaridade de nome
              filterMessage.innerHTML = `Localização da planilha não especificada. Listando todos os ${candidatesWithScore.length} itens S/T com similaridade de nome (> 0.3).`;
         }
     }
@@ -790,7 +660,7 @@ function confirmManualLink() {
 
     // Retirada do pool para evitar reuso (REGRA 1)
     const unitName = systemItem.Unidade;
-    const pool = multiUnitImportData.stItemsInManualLinkPool.get(unitName);
+    const pool = importData.stItemsInManualLinkPool.get(unitName);
     if (pool) {
         const index = pool.findIndex(item => item.id === systemId);
         if (index > -1) {
@@ -798,24 +668,19 @@ function confirmManualLink() {
         }
     }
 
-
     // Atualiza a linha de comparação em memória
-    const comparisonRow = multiUnitImportData.comparisonData[selPastedItemIndex];
+    const comparisonRow = importData.comparisonData[selPastedItemIndex];
     comparisonRow.bestMatch = systemItem;
     comparisonRow.score = 1.0; // 1.0 para indicar override manual
     comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha
-    
-    // CORREÇÃO ESSENCIAL: O item agora deve ser tratado como UPDATE (foi ligado a um item existente)
     comparisonRow.finalAction = 'update';
 
     // Fecha o modal
     DOM_IMPORT.manualLinkModal.classList.add('hidden');
     selPastedItemIndex = null;
 
-    // Re-renderiza a lista de preview
-    // CORREÇÃO: Forçamos o re-render com o filtro "all" para o item reaparecer no status correto.
     DOM_IMPORT.editByDescActionFilter.value = 'all'; 
-    renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+    renderEditByDescPreview(importData.comparisonData, importData.fieldUpdates);
     showNotification('Item ligado manualmente. A linha foi movida para "Atualizar".', 'success');
 }
 
@@ -823,27 +688,21 @@ function confirmManualLink() {
  * Lida com o fechamento/cancelamento do modal de ligação manual.
  */
 function handleManualLinkModalClose() {
-    // A lógica de retorno ao pool (se necessário) foi movida para a função de confirmação,
-    // já que o item só sai do pool quando o link é salvo. 
-    // Se o usuário clicar em Cancelar, o item permanece no pool original.
     selPastedItemIndex = null;
     DOM_IMPORT.manualLinkModal.classList.add('hidden');
 }
 
-
-// FIM DA ALTERAÇÃO
 
 // --- LISTENERS ---
 
 export function setupImportacaoListeners(reloadDataCallback) {
     // 1. Setup para selects de unidade
     setupUnitSelect(DOM_IMPORT.massTransferTipo, DOM_IMPORT.massTransferUnit);
-    setupUnitSelect(DOM_IMPORT.replaceTipo, DOM_IMPORT.replaceUnit);
-    // setupUnitSelect(DOM_IMPORT.editByDescTipo, DOM_IMPORT.editByDescUnit); // Removido
+    // setupUnitSelect(DOM_IMPORT.replaceTipo, DOM_IMPORT.replaceUnit); // Removido
+    setupUnitSelect(DOM_IMPORT.importTipo, DOM_IMPORT.importUnit); // Adicionado
 
-    // 2. Lógica de Importação em Massa
+    // 2. Lógica de Importação em Massa (Mantida)
     DOM_IMPORT.massTransferSearchBtn.addEventListener('click', async () => {
-        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
         const { patrimonioFullList, giapMap } = getState();
         const tombos = DOM_IMPORT.massTransferTombos.value.split(/[,;\s\n]+/).map(t => normalizeTombo(t)).filter(t => t && t.toLowerCase() !== 's/t');
         const tipo = DOM_IMPORT.massTransferTipo.value;
@@ -887,7 +746,6 @@ export function setupImportacaoListeners(reloadDataCallback) {
         DOM_IMPORT.massTransferConfirmBtn.disabled = itemsToCreate.length === 0;
     });
     
-    // Definir estado para todos os itens
     DOM_IMPORT.massTransferSetAllStatus.addEventListener('change', (e) => {
         const status = e.target.value;
         document.querySelectorAll('#mass-transfer-list .status-select').forEach(select => {
@@ -895,9 +753,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
         });
     });
 
-    // Confirmação de Importação em Massa
     DOM_IMPORT.massTransferConfirmBtn.addEventListener('click', async () => {
-        // *** CORREÇÃO: Obtém estado atualizado AQUI DENTRO ***
         const { giapMap } = getState();
         const tipo = DOM_IMPORT.massTransferTipo.value;
         const unidade = DOM_IMPORT.massTransferUnit.value;
@@ -945,7 +801,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // 3. Lógica para Adicionar Nova Unidade GIAP
+    // 3. Lógica para Adicionar Nova Unidade GIAP (Mantida)
     DOM_IMPORT.saveGiapUnitBtn.addEventListener('click', async () => {
         const name = DOM_IMPORT.addGiapName.value.trim();
         const number = DOM_IMPORT.addGiapNumber.value.trim();
@@ -975,174 +831,36 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // 4. Lógica de Substituir Inventário (Preview e Confirmação)
-    DOM_IMPORT.previewReplaceBtn.addEventListener('click', () => {
-        const data = DOM_IMPORT.replaceData.value;
-        if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
-        
-        const parsed = Papa.parse(data, { 
-            header: true, 
-            skipEmptyLines: true, 
-            delimiter: '\t', 
-            transformHeader: h => normalizeStr(h) // Remove acentos, espaços e converte para minúsculo
-        }).data;
-        
-        if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado.', 'error');
-        
-        DOM_IMPORT.replaceResults.classList.remove('hidden');
-        document.getElementById('replace-preview-count').textContent = parsed.length;
-        
-        // INÍCIO DA ALTERAÇÃO: Adiciona coluna "Origem da Doação" na pré-visualização
-        let previewHtml = `
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="bg-slate-100">
-                        <th class="p-2 text-left">Descrição</th>
-                        <th class="p-2 text-left">Tombamento</th>
-                        <th class="p-2 text-left">Local</th>
-                        <th class="p-2 text-left">Estado</th>
-                        <th class="p-2 text-left">Origem (Auto)</th>
-                    </tr>
-                </thead
-                <tbody>
-        `;
-        
-        previewHtml += parsed.map(item => {
-            // Usa os nomes de coluna normalizados (sem acento)
-            const desc = escapeHtml(item.descricao || item.item || 'S/D');
-            const tombo = escapeHtml(item.tombamento || item.tombo || 'S/T');
-            const local = escapeHtml(item.local || item.localizacao || 'N/I');
-            const estadoInput = item['estado de conservacao'] || item.estado || 'Regular';
-            
-            // Normaliza o valor do estado
-            const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
-            
-            // Extrai a origem da doação
-            const origemDoacao = extractOrigemDoacao(item);
-            
-            return `
-                <tr class="border-b">
-                    <td class="p-2">${desc}</td>
-                    <td class="p-2 font-mono">${tombo}</td>
-                    <td class="p-2">${local}</td>
-                    <td class="p-2">
-                        <span class="font-semibold text-blue-600">${escapeHtml(estadoNormalizado)}</span>
-                        <span class="text-xs text-slate-500" title="Valor original colado">(${escapeHtml(estadoInput)})</span>
-                    </td>
-                    <td class="p-2 text-green-600 font-medium">${escapeHtml(origemDoacao)}</td>
-                </tr>
-            `;
-        }).join('');
+    // 4. Lógica de Substituir Inventário (Removida)
+    // Os listeners para 'previewReplaceBtn' e 'confirmReplaceBtn' foram removidos
+    // pois a sub-aba foi ocultada no HTML.
 
-        previewHtml += `</tbody></table>`;
-        DOM_IMPORT.replacePreviewList.innerHTML = previewHtml;
-        // FIM DA ALTERAÇÃO
-        
-        DOM_IMPORT.confirmReplaceBtn.disabled = !DOM_IMPORT.replaceConfirmCheckbox.checked;
-    });
-
-    DOM_IMPORT.replaceConfirmCheckbox.addEventListener('change', (e) => {
-        DOM_IMPORT.confirmReplaceBtn.disabled = !e.target.checked;
-    });
-
-    DOM_IMPORT.confirmReplaceBtn.addEventListener('click', async () => {
-        const tipo = DOM_IMPORT.replaceTipo.value;
-        const unidade = DOM_IMPORT.replaceUnit.value;
-        const data = DOM_IMPORT.replaceData.value;
-
-        if (!tipo || !unidade) return showNotification('Selecione o Tipo e a Unidade de destino.', 'warning');
-        if (!DOM_IMPORT.replaceConfirmCheckbox.checked) return showNotification('Você deve confirmar a exclusão.', 'warning');
-
-        showOverlay(`Substituindo inventário de ${unidade}...`);
-        
-        // 1. Parse dos Novos Dados
-        const parsed = Papa.parse(data, { 
-            header: true, 
-            skipEmptyLines: true, 
-            delimiter: '\t', 
-            transformHeader: h => normalizeStr(h) // Remove acentos, espaços e converte para minúsculo
-        }).data;
-        
-        // 2. Apagar itens existentes
-        try {
-            const q = query(collection(db, 'patrimonio'), where('Unidade', '==', unidade));
-            const snapshot = await getDocs(q);
-            const deleteBatch = writeBatch(db);
-            snapshot.docs.forEach(doc => deleteBatch.delete(doc.ref));
-            await deleteBatch.commit();
-            showNotification(`${snapshot.size} itens antigos de ${unidade} apagados.`, 'info');
-        } catch (e) {
-            hideOverlay();
-            showNotification('Erro ao apagar inventário antigo.', 'error');
-            console.error(e);
-            return;
-        }
-
-        // 3. Criar novos itens
-        try {
-            const createBatch = writeBatch(db);
-            const newItemsForCache = [];
-            
-            parsed.forEach(item => {
-                const docRef = doc(collection(db, 'patrimonio'));
-                
-                // INÍCIO DA ALTERAÇÃO: Lógica de criação de newItem atualizada com origem da doação
-                const estadoInput = item['estado de conservacao'] || item.estado || 'Regular';
-                const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
-                const origemDoacao = extractOrigemDoacao(item);
-
-                const newItem = {
-                    id: docRef.id,
-                    Tombamento: item.tombamento || item.tombo || 'S/T', 
-                    Descrição: item.descricao || item.item || 'Item sem descrição',
-                    Tipo: tipo, 
-                    Unidade: unidade, 
-                    Localização: item.local || item.localizacao || '',
-                    Fornecedor: '', 
-                    NF: '', 
-                    'Origem da Doação': origemDoacao, // Salva a origem extraída
-                    Estado: estadoNormalizado, // Salva o estado normalizado
-                    Quantidade: 1, 
-                    Observação: `Substituição em massa. (Estado original: ${estadoInput})`,
-                    isPermuta: false,
-                    createdAt: serverT(), 
-                    updatedAt: serverT()
-                };
-                // FIM DA ALTERAÇÃO
-
-                createBatch.set(docRef, newItem);
-                newItemsForCache.push(newItem);
-            });
-
-            await createBatch.commit();
-            // Atualiza o cache local (idb)
-            const oldItems = await idb.patrimonio.where('Unidade').equals(unidade).toArray();
-            await idb.patrimonio.bulkDelete(oldItems.map(i => i.id));
-            await idb.patrimonio.bulkAdd(newItemsForCache);
-            
-            showNotification(`Novo inventário com ${parsed.length} itens criado.`, 'success');
-            reloadDataCallback(true); // Força recarregamento completo
-        } catch (e) {
-            hideOverlay();
-            showNotification('Erro ao criar novo inventário.', 'error');
-            console.error(e);
-        }
-    });
-
-    // 5. Lógica de Edição por Descrição (Preview e Confirmação)
+    // 5. Lógica de "Importar e Atualizar Unidade" (Antiga "Editar por Descrição")
     
-    // ETAPA 1: Clique em "Pré-visualizar Unidades"
+    // ETAPA 1: Clique em "Comparar Planilha com Unidade"
     DOM_IMPORT.previewEditByDescBtn.addEventListener('click', () => {
         // Reseta o estado local
-        multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: new Map() };
+        importData = { pasted: [], selectedUnitName: null, fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: new Map() };
 
         const data = DOM_IMPORT.editByDescData.value;
-        if (!data) return showNotification('Cole os dados do Excel primeiro.', 'warning');
+        const selectedSystemUnit = DOM_IMPORT.importUnit.value;
         
-        // Lê os campos a atualizar
-        DOM_IMPORT.editByDescFields.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-            multiUnitImportData.fieldUpdates[cb.dataset.field] = cb.checked;
-        });
+        if (!selectedSystemUnit) {
+             return showNotification('Selecione o Tipo e a Unidade de destino primeiro.', 'warning');
+        }
+        if (!data) {
+             return showNotification('Cole os dados do Excel primeiro.', 'warning');
+        }
+        
+        // Hardcode os campos a atualizar, conforme o novo fluxo
+        importData.fieldUpdates = {
+            Tombamento: true,
+            Descrição: true,
+            Localização: true,
+            Estado: true,
+            Observação: true,
+            Origem: true // (Origem da Doação)
+        };
         
         const parsed = Papa.parse(data, { 
             header: true, 
@@ -1153,54 +871,24 @@ export function setupImportacaoListeners(reloadDataCallback) {
         
         if (parsed.length === 0) return showNotification('Nenhum dado válido encontrado (verifique se o cabeçalho foi colado).', 'error');
 
-        // Verifica se a coluna "UNIDADE" existe
-        if (!parsed[0].hasOwnProperty('unidade')) {
-            return showNotification('Coluna "UNIDADE" não encontrada na planilha. Esta coluna é obrigatória para esta ferramenta.', 'error');
-        }
+        // Força a unidade de destino em todos os itens colados
+        importData.pasted = parsed.map(item => ({ ...item, unidade: selectedSystemUnit }));
         
-        multiUnitImportData.pasted = parsed;
-        const { normalizedSystemUnits } = getState();
-        const systemUnits = [...normalizedSystemUnits.values()];
+        // Esconde o botão de pré-visualização e o formulário
+        // DOM_IMPORT.previewEditByDescBtn.classList.add('hidden');
+        // DOM_IMPORT.editByDescData.disabled = true;
 
-        // Encontra unidades únicas da planilha
-        const pastedUnits = new Set(parsed.map(item => item.unidade).filter(Boolean));
-        const unitsToMatch = new Map();
-
-        // Tenta encontrar a melhor correspondência
-        pastedUnits.forEach(pastedUnit => {
-            let bestMatch = '';
-            let bestScore = 0;
-            const normPasted = normalizeStr(pastedUnit);
-
-            systemUnits.forEach(systemUnit => {
-                const score = calculateSimilarity(normPasted, normalizeStr(systemUnit));
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMatch = systemUnit;
-                }
-            });
-            
-            // Se a similaridade for alta, sugere
-            unitsToMatch.set(pastedUnit, bestScore > 0.7 ? bestMatch : '');
-        });
-        
-        // Renderiza a Etapa 2 (Mapeamento de Unidades)
-        renderUnitMatchingUI(unitsToMatch);
+        // Processa e renderiza a tabela de comparação
+        processAndLoadItems();
     });
-
-    // ETAPA 2: Clique em "Confirmar Unidades e Ver Itens"
-    DOM_IMPORT.confirmUnitMappingBtn.addEventListener('click', debounce(processUnitMappingAndLoadItems, 200));
-
     
-    // Listeners para Ações em Massa (Req D)
+    // Listeners para Ações em Massa (Mantidos)
     if (DOM_IMPORT.editByDescSelectAll) {
         DOM_IMPORT.editByDescSelectAll.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
-            // INÍCIO DA ALTERAÇÃO: (Req 1) O seletor agora busca em todo o container
             DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox').forEach(cb => {
                  cb.checked = isChecked;
             });
-            // FIM DA ALTERAÇÃO
         });
     }
 
@@ -1209,9 +897,7 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const action = DOM_IMPORT.editByDescBulkAction.value;
             if (!action) return showNotification('Selecione uma ação em massa.', 'warning');
 
-            // INÍCIO DA ALTERAÇÃO: O seletor agora busca apenas linhas VISÍVEIS
             const checkedRows = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox:checked');
-            // FIM DA ALTERAÇÃO
             if (checkedRows.length === 0) return showNotification('Nenhum item selecionado.', 'warning');
 
             checkedRows.forEach(cb => {
@@ -1220,29 +906,25 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 if (select) {
                     select.value = action;
                     
-                    // Atualiza o estado da ação final no comparisonData
                     const rowIndex = parseInt(row.dataset.rowIndex, 10);
-                    if (rowIndex > -1 && multiUnitImportData.comparisonData[rowIndex]) {
-                         multiUnitImportData.comparisonData[rowIndex].finalAction = action;
-                         row.dataset.action = action; // Atualiza o atributo da linha para o filtro
+                    if (rowIndex > -1 && importData.comparisonData[rowIndex]) {
+                         importData.comparisonData[rowIndex].finalAction = action;
+                         row.dataset.action = action; 
                     }
                     
-                    // Ajusta o checkbox
                     cb.checked = (action !== 'ignore');
                 }
             });
-            updateEditByDescSummary(); // Atualiza a contagem
+            updateEditByDescSummary(); 
             showNotification(`Ação em massa aplicada a ${checkedRows.length} itens.`, 'info');
         });
     }
 
-    // Listener para mudança individual de ação
+    // Listener para mudança individual de ação (Mantido)
     DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('change', (e) => {
-        // (Req 1) Listener para "select all" de uma unidade específica
         if (e.target.classList.contains('edit-by-desc-unit-select-all')) {
             const isChecked = e.target.checked;
             const tableBody = e.target.closest('table').querySelector('tbody');
-            // Filtra por linhas VISÍVEIS (não filtradas pelo filtro de ação)
             tableBody.querySelectorAll('tr:not([style*="none"]) .edit-by-desc-row-checkbox').forEach(cb => {
                 cb.checked = isChecked;
             });
@@ -1255,32 +937,26 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const rowIndex = parseInt(rowEl.dataset.rowIndex, 10);
             const rowCheckbox = rowEl.querySelector('.edit-by-desc-row-checkbox');
 
-            // Atualiza o estado da ação final no comparisonData
-            if (rowIndex > -1 && multiUnitImportData.comparisonData[rowIndex]) {
-                 multiUnitImportData.comparisonData[rowIndex].finalAction = action;
-                 rowEl.dataset.action = action; // Atualiza o atributo da linha para o filtro
+            if (rowIndex > -1 && importData.comparisonData[rowIndex]) {
+                 importData.comparisonData[rowIndex].finalAction = action;
+                 rowEl.dataset.action = action; 
             }
 
-            // Ajusta o checkbox e o sumário
             rowCheckbox.checked = (action !== 'ignore');
             updateEditByDescSummary();
         }
     });
     
-    // INÍCIO DA ALTERAÇÃO: Adiciona listener para o filtro de ação
+    // Listener para o filtro de ação (Mantido)
     if (DOM_IMPORT.editByDescActionFilter) {
         DOM_IMPORT.editByDescActionFilter.addEventListener('change', () => {
-             // Quando o filtro de ação muda, re-renderizamos (ou chamamos uma função de filtro se o dataset for grande)
-             // Já que renderEditByDescPreview chama a si mesma com o filtro aplicado, basta re-renderizar
-             if (multiUnitImportData.comparisonData.length > 0) {
-                 renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
+             if (importData.comparisonData.length > 0) {
+                 renderEditByDescPreview(importData.comparisonData, importData.fieldUpdates);
              }
         });
     }
-    // FIM DA ALTERAÇÃO
 
-
-    // INÍCIO DA ALTERAÇÃO: (Req 2) Listener para o novo botão "Ligar Manualmente"
+    // Listener para o botão "Ligar Manualmente" (Mantido)
     DOM_IMPORT.editByDescPreviewTableContainer.addEventListener('click', (e) => {
         if (e.target.classList.contains('link-manual-btn')) {
             const rowIndex = parseInt(e.target.closest('tr').dataset.rowIndex, 10);
@@ -1288,25 +964,23 @@ export function setupImportacaoListeners(reloadDataCallback) {
         }
     });
 
-    // (Req 2) Listeners para o novo modal
+    // Listeners para o modal de ligação manual (Mantido)
     if (DOM_IMPORT.manualLinkConfirmBtn) {
         DOM_IMPORT.manualLinkConfirmBtn.addEventListener('click', confirmManualLink);
     }
     document.body.addEventListener('click', (e) => {
-        // Usa a função de fechar dedicada ao modal manual
         if (e.target.matches('.js-close-modal-manual-link') || e.target.matches('#manual-link-modal .modal-overlay')) {
             handleManualLinkModalClose();
         }
     });
-    // FIM DA ALTERAÇÃO
 
-    // ETAPA 3: Clique em "Confirmar e Atualizar Itens" (Req C)
+    // ETAPA 2: Clique em "Confirmar e Atualizar Itens" (Mantido, mas lógica de campos atualizada)
     DOM_IMPORT.confirmEditByDescBtn.addEventListener('click', async () => {
         const actionSelects = DOM_IMPORT.editByDescPreviewTableContainer.querySelectorAll('select.edit-by-desc-action');
         const itemsToUpdate = [];
-        const itemsToCreate = []; // Novo array para itens a criar (Req 5)
-        const { fieldUpdates, comparisonData } = multiUnitImportData;
-        let updateCount = 0; // Contagem para o overlay
+        const itemsToCreate = [];
+        const { fieldUpdates, comparisonData } = importData;
+        let updateCount = 0; 
 
         actionSelects.forEach(select => {
             const row = select.closest('tr');
@@ -1314,44 +988,33 @@ export function setupImportacaoListeners(reloadDataCallback) {
             const action = select.value;
             const rowIndex = parseInt(row.dataset.rowIndex, 10);
             
-            // --- NOVO CHECK DE SEGURANÇA CRÍTICO (CORREÇÃO DA TRAGÉDIA) ---
-            // Ação só é processada se o SELECT não for 'ignore' E o CHECKBOX da linha estiver marcado.
             if (action === 'ignore' || !rowCheckbox || !rowCheckbox.checked) {
                 return; 
             }
-            // -----------------------------------------------------------------
 
             const systemId = select.dataset.systemId;
-            const { pastedItem, bestMatch, updateDescription, systemUnitName } = comparisonData[rowIndex];
+            const { pastedItem, bestMatch, updateDescription } = comparisonData[rowIndex];
+            const systemUnitName = importData.selectedUnitName; // Pega a unidade selecionada
 
             if (action === 'create_new') {
-                // Lógica para criar novo item (Sobrando)
-                const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
-
-                // Permite a criação mesmo sem Tombo (pastedTombo pode ser vazio/S/T)
                 updateCount++;
                 const docRef = doc(collection(db, 'patrimonio'));
                 
+                const pastedTombo = normalizeTombo(pastedItem.tombamento || pastedItem.tombo);
                 const estadoInput = pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular';
                 const estadoNormalizado = normalizeEstadoConservacao(estadoInput);
                 const origemDoacao = extractOrigemDoacao(pastedItem);
                 
-                // --- INÍCIO DA CORREÇÃO DE BUG CRÍTICO (Adicionado) ---
-                // 1. Tenta encontrar o Tipo correto da unidade de destino no inventário existente
                 const existingItemInUnit = getState().patrimonioFullList.find(i => 
                     normalizeStr(i.Unidade) === normalizeStr(systemUnitName)
                 );
-                
-                // 2. Define o Tipo - usa o tipo de um item existente ou o padrão de auditoria
                 let itemType = existingItemInUnit?.Tipo || 'N/A (AUDITORIA)'; 
-                // --- FIM DA CORREÇÃO DE BUG CRÍTICO ---
-
 
                 const newItem = {
                     id: docRef.id,
-                    Tombamento: pastedTombo, // O filtro de entrada garante que é numérico aqui
+                    Tombamento: pastedTombo, 
                     Descrição: pastedItem.descricao || pastedItem.item || 'Item sem descrição',
-                    Tipo: itemType, // <-- AGORA USA O TIPO ENCONTRADO
+                    Tipo: itemType,
                     Unidade: systemUnitName, 
                     Localização: pastedItem.local || pastedItem.localizacao || '',
                     Fornecedor: '', 
@@ -1367,40 +1030,23 @@ export function setupImportacaoListeners(reloadDataCallback) {
                 itemsToCreate.push({ docRef, data: newItem });
                 
             } else if (action === 'update') {
-                // Lógica de atualização (Item encontrado)
                 if (systemId && pastedItem && bestMatch) {
                     updateCount++;
-                    // Constrói o objeto de 'changes' com base nos campos selecionados
                     const changes = { updatedAt: serverT() };
                     let obs = bestMatch.Observação || '';
                     
-                    // Nota: O Tombamento não é atualizado se foi ligado manualmente (apenas S/T pode ter sido ligado), 
-                    // mas como o filtro de entrada agora só aceita tombos, esta lógica se simplifica:
+                    // Lógica de atualização simplificada: atualiza tudo
+                    changes.Tombamento = pastedItem.tombamento || pastedItem.tombo;
+                    changes.Localização = pastedItem.local || pastedItem.localizacao || '';
+                    changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
+                    changes['Origem da Doação'] = extractOrigemDoacao(pastedItem);
+                    changes.Observação = pastedItem.observacao || pastedItem.obs || '';
                     
-                    if (fieldUpdates.Tombamento) {
-                        changes.Tombamento = pastedItem.tombamento || pastedItem.tombo;
-                    }
-                    if (fieldUpdates.Localização) {
-                        changes.Localização = pastedItem.local || pastedItem.localizacao || '';
-                    }
-                    if (fieldUpdates.Estado) {
-                        changes.Estado = normalizeEstadoConservacao(pastedItem['estado de conservacao'] || pastedItem.estado || 'Regular');
-                    }
-                    // Adiciona a Origem da Doação (REGRA DO USUÁRIO)
-                    // if (fieldUpdates['Origem da Doação']) { // Mesmo se não tiver checkbox, forçamos a atualização se vier do manual link
-                         changes['Origem da Doação'] = extractOrigemDoacao(pastedItem);
-                    // }
-                    // Verifica a flag de ligação manual para forçar a atualização da descrição
-                    if (fieldUpdates.Descrição || updateDescription) {
+                    // Se foi ligado manualmente E o usuário marcou a caixa, atualiza a descrição
+                    if (updateDescription) {
                         changes.Descrição = pastedItem.descricao || pastedItem.item || 'S/D';
                     }
                     
-                    if (fieldUpdates.Observação) {
-                        // Substitui a observação antiga
-                        changes.Observação = pastedItem.observacao || pastedItem.obs || '';
-                    }
-                    
-                    // Adiciona uma nota de auditoria
                     const auditMsg = bestMatch.Tombamento !== changes.Tombamento ? '[Tombo Corrigido e Atualizado]' : '[Atualizado via Importação]';
                     changes.Observação = `${auditMsg} ` + (changes.Observação || obs);
 
@@ -1413,23 +1059,18 @@ export function setupImportacaoListeners(reloadDataCallback) {
         });
 
         if (updateCount === 0) {
-            // Mensagem de erro atualizada
             return showNotification('Nenhum item foi marcado (checkbox) para "Atualizar" ou "Criar Novo Item".', 'info');
         }
 
         showOverlay(`Processando ${itemsToUpdate.length} atualizações e ${itemsToCreate.length} criações...`);
         const batch = writeBatch(db);
         const newItemsForCache = [];
-        const updatedItemIds = []; // IDs dos itens atualizados para limpar da UI
-
-        // Adiciona atualizações ao batch
+        
         itemsToUpdate.forEach(item => {
             const docRef = doc(db, 'patrimonio', item.id);
             batch.update(docRef, item.changes);
-            updatedItemIds.push(item.id);
         });
 
-        // Adiciona criações ao batch
         itemsToCreate.forEach(item => {
             batch.set(item.docRef, item.data);
             newItemsForCache.push(item.data);
@@ -1438,44 +1079,21 @@ export function setupImportacaoListeners(reloadDataCallback) {
         try {
             await batch.commit();
             
-            // Atualiza cache (apenas com os novos, o reload se encarrega do resto)
             if (newItemsForCache.length > 0) {
                 await idb.patrimonio.bulkAdd(newItemsForCache);
             }
             
-            // Limpa o cache para forçar o reload (apenas metadados)
             await idb.metadata.clear(); 
             
-            showNotification(`${updateCount} ações concluídas!`, 'success');
+            showNotification(`${updateCount} ações concluídas! Recarregando...`, 'success');
             
-            // --- INÍCIO DA CORREÇÃO: Não recarrega, apenas limpa o estado ---
+            // Reseta a UI da aba
+            DOM_IMPORT.editByDescResults.classList.add('hidden');
+            DOM_IMPORT.editByDescData.value = '';
+            importData = { pasted: [], selectedUnitName: null, fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: new Map() };
             
-            // 1. Remove os itens do estado local 'comparisonData'
-            const processedItemIndices = itemsToUpdate.map(item => comparisonData.findIndex(row => row.bestMatch && row.bestMatch.id === item.id))
-                                       .concat(itemsToCreate.map(item => comparisonData.findIndex(row => row.pastedItem.tombamento === normalizeTombo(item.data.Tombamento))));
-            
-            // Remove os itens processados da lista de dados comparativos (de trás para frente)
-            processedItemIndices.sort((a, b) => b - a).filter(index => index > -1).forEach(index => {
-                 multiUnitImportData.comparisonData.splice(index, 1);
-            });
-            
-            // 2. Re-renderiza a lista de preview
-            if(multiUnitImportData.comparisonData.length > 0) {
-                 renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
-                 // O total de itens é atualizado dentro da função renderEditByDescPreview
-            } else {
-                 // Reseta a UI da aba
-                 DOM_IMPORT.editByDescResults.classList.add('hidden');
-                 DOM_IMPORT.editByDescUnitMatching.classList.add('hidden');
-                 DOM_IMPORT.editByDescData.value = '';
-                 multiUnitImportData = { pasted: [], unitMap: new Map(), fieldUpdates: {}, comparisonData: [], stItemsInManualLinkPool: new Map() }; // Reseta estado local
-                 showNotification('Todas as ações selecionadas foram salvas. Recarregue a página para começar um novo lote.', 'info');
-            }
-            
-            // 3. Força o recarregamento do estado global para refletir as mudanças nas outras abas
-            reloadDataCallback(); 
-            
-            // --- FIM DA CORREÇÃO ---
+            // Força o recarregamento do estado global
+            reloadDataCallback(true); 
             
         } catch (error) {
             hideOverlay();
