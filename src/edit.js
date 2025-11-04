@@ -100,7 +100,7 @@ async function loadData(forceRefresh = false) {
     ]);
 
     // Cria os mapas para acesso rápido (essencial para as abas)
-    // INÍCIO DA ALTERAÇÃO: Usar normalizeTombo para criar os mapas
+    // INÍCIO DA ALTERAÇÃO: Usar normalizeTombo
     const giapMapAllItems = new Map(giapInventory.map(item => [normalizeTombo(item['TOMBAMENTO']), item]));
     const giapMap = new Map(giapInventory
         .filter(item => normalizeStr(item.Status).includes(normalizeStr('Disponível')))
@@ -582,7 +582,8 @@ function setupListeners() {
 
     // --- Delega a lógica das abas para seus respectivos módulos ---
     setupInventarioListeners(loadData, openSyncModal);
-    setupLigarUnidadesListeners();
+    // CORREÇÃO: Passa a função loadData para setupLigarUnidadesListeners
+    setupLigarUnidadesListeners(loadData);
     setupConciliarListeners(loadData);
     setupTransferenciasListeners(loadData);
     setupImportacaoListeners(loadData);
