@@ -968,8 +968,8 @@ function generateBulkReplaceActions() {
     
     let validMappingFound = false;
 
-    mappingSelects.forEach(select => {
-        const pastedUnit = select.dataset.pasted-unit;
+    mappingSelects.forEach(select => { // CORRIGIDO: Agora itera sobre a NodeList corretamente
+        const pastedUnit = select.dataset.pastedUnit; // CORRIGIDO: Usando camelCase
         const confirmedSystemUnit = select.value;
 
         // Se o usuário selecionou "-- Ignorar --" (value=""), não faz nada
