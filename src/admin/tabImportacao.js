@@ -447,6 +447,7 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
     // (Req 1) Agrupa os dados por unidade do sistema
     const groupedByUnit = comparisonData.reduce((acc, row) => {
         // *** NOVO: Adiciona a ação final baseada no initialAction (usada no filtro)
+        // Se a ação final não foi definida (ex: após ligação manual), usa a inicial.
         row.finalAction = row.finalAction || (row.bestMatch ? 'update' : 'create_new');
         // *** FIM NOVO ***
         
@@ -466,12 +467,18 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
         
         // Filtra os itens por unidade antes de renderizar
         const filteredItems = items.filter(row => {
+            // Se o item foi ligado manualmente (bestMatch existe), ele vira 'update'
+            const currentAction = row.bestMatch && row.finalAction === 'create_new' ? 'update' : row.finalAction;
+
             if (actionFilter === 'all') return true;
+            
+            // Lógica para o filtro 'Manual'
             if (actionFilter === 'manual') {
-                 // Ação manual é para itens que são "create_new" mas ainda não foram ligados manualmente
-                 return row.finalAction === 'create_new' && row.bestMatch === null;
+                 // Um item é 'manual' se a ação final for 'create_new' E ele não tem match (bestMatch: null)
+                 return currentAction === 'create_new' && row.bestMatch === null;
             }
-            return row.finalAction === actionFilter;
+            
+            return currentAction === actionFilter;
         });
 
         if (filteredItems.length === 0) return; // Se a unidade não tem itens com o filtro, não renderiza
@@ -500,6 +507,9 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             // Encontra o índice global do item para o data-row-index
             const index = comparisonData.indexOf(row);
             const { pastedItem, bestMatch, score, systemUnitName, finalAction } = row;
+            
+            // Determina a ação atual para a renderização do select
+            const currentRenderAction = bestMatch ? 'update' : finalAction;
 
             // --- Dados da Planilha ---
             const pastedDesc = escapeHtml(pastedItem.descricao || pastedItem.item || 'S/D');
@@ -554,8 +564,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 `;
                 actionHtml = `
                     <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="${bestMatch.id}" data-row-index="${index}">
-                        <option value="update" ${finalAction === 'update' ? 'selected' : ''}>Atualizar Campos Marcados</option>
-                        <option value="ignore" ${finalAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
+                        <option value="update" ${currentRenderAction === 'update' ? 'selected' : ''}>Atualizar Campos Marcados</option>
+                        <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar</option>
                     </select>
                 `;
             } else {
@@ -565,13 +575,11 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
                 systemHtml = `<p class="font-semibold text-red-700">Tombo ${pastedTomboNormalizado} não encontrado no sistema.</p>`;
                 
                 // Ação Manual/Criar Novo
-                const isManual = (finalAction === 'create_new' && bestMatch === null); // O critério 'manual' é ser um item para criar novo.
-                
                 actionHtml = `
-                    <div class="space-y-1" data-is-manual="${isManual}">
+                    <div class="space-y-1">
                         <select class="edit-by-desc-action w-full p-2 border rounded-lg bg-white" data-system-id="new-item-${index}" data-row-index="${index}">
-                            <option value="create_new" ${finalAction === 'create_new' ? 'selected' : ''}>Criar Novo Item (Sobrando)</option>
-                            <option value="ignore" ${finalAction === 'ignore' ? 'selected' : ''}>Ignorar Linha</option>
+                            <option value="create_new" ${currentRenderAction === 'create_new' ? 'selected' : ''}>Criar Novo Item (Sobrando)</option>
+                            <option value="ignore" ${currentRenderAction === 'ignore' ? 'selected' : ''}>Ignorar Linha</option>
                         </select>
                         <!-- BOTÃO DE LIGAÇÃO MANUAL -->
                         <button type="button" class="link-manual-btn w-full bg-yellow-500 text-white px-3 py-1 rounded-lg text-sm hover:bg-yellow-600">Ligar S/T Manualmente</button>
@@ -580,8 +588,8 @@ function renderEditByDescPreview(comparisonData, fieldUpdates) {
             }
 
             html += `
-                <tr class="border-b ${rowClass}" data-row-index="${index}" data-action="${finalAction}">
-                    <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${finalAction !== 'ignore' ? 'checked' : ''}></td>
+                <tr class="border-b ${rowClass}" data-row-index="${index}" data-action="${currentRenderAction}">
+                    <td class="p-2 align-top"><input type="checkbox" class="edit-by-desc-row-checkbox h-4 w-4" ${currentRenderAction !== 'ignore' ? 'checked' : ''}></td>
                     <td class="p-2 align-top">${planilhaHtml}</td>
                     <td class="p-2 align-top">${systemHtml}</td>
                     <td class="p-2 align-top">${actionHtml}</td>
@@ -631,7 +639,11 @@ function updateEditByDescSummary() {
         const select = rowEl.querySelector('select.edit-by-desc-action');
         const action = select ? select.value : null;
         const rowIndex = parseInt(rowEl.dataset.rowIndex, 10);
-        const isManual = !multiUnitImportData.comparisonData[rowIndex].bestMatch; // Se ainda não tem bestMatch (e é create_new)
+        
+        const rowData = multiUnitImportData.comparisonData[rowIndex];
+        
+        // Se a ação for 'create_new' E não houver bestMatch, consideramos "MANUAL" (criação pendente de ligação)
+        const isManual = (action === 'create_new' && rowData && rowData.bestMatch === null); 
 
         if (action === 'update') uiUpdateCount++;
         else if (action === 'ignore') uiIgnoreCount++;
@@ -793,7 +805,7 @@ function confirmManualLink() {
     comparisonRow.score = 1.0; // 1.0 para indicar override manual
     comparisonRow.updateDescription = isUpdateDescChecked; // Armazena a escolha
     
-    // Define a ação final como "update", pois é uma ligação de S/T para Tombo
+    // CORREÇÃO ESSENCIAL: O item agora deve ser tratado como UPDATE (foi ligado a um item existente)
     comparisonRow.finalAction = 'update';
 
     // Fecha o modal
@@ -801,6 +813,8 @@ function confirmManualLink() {
     selPastedItemIndex = null;
 
     // Re-renderiza a lista de preview
+    // CORREÇÃO: Forçamos o re-render com o filtro "all" para o item reaparecer no status correto.
+    DOM_IMPORT.editByDescActionFilter.value = 'all'; 
     renderEditByDescPreview(multiUnitImportData.comparisonData, multiUnitImportData.fieldUpdates);
     showNotification('Item ligado manualmente. A linha foi movida para "Atualizar".', 'success');
 }
