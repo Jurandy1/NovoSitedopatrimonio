@@ -1,4 +1,4 @@
-<!DOCTYPE html><!DOCTYPE html>
+<!DOCTYPE html><!DOCTYPE html><!DOCTYPE html><!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -59,7 +59,7 @@
                     <button class="nav-btn" data-tab="conciliar">🤝 Conciliar Itens</button>
                     <button class="nav-btn" data-tab="sobrando">⚠️ Tombos Sobrando</button>
                     <button class="nav-btn" data-tab="transferencias">🚨 Transferências</button>
-                    <button class="nav-btn" data-tab="importacao">🔄 Importação e Substituição</button>
+                    <button class="nav-btn" data-tab="importacao">🔄 Importação e Atualização</button>
                     <button class="nav-btn" data-tab="notas_fiscais">📋 Notas Fiscais</button>
                     <button class="nav-btn" data-tab="giap">📋 Planilha GIAP</button>
                 </div>
@@ -79,14 +79,12 @@
                         <div>
                             <label for="edit-filter-unidade" class="block text-sm font-medium mb-1">Filtrar por Unidade</label>
                             <select id="edit-filter-unidade" class="w-full p-2 border rounded-lg bg-white"></select>
-                             <!-- INÍCIO DA ALTERAÇÃO: Adicionado contador e botão de adicionar -->
                              <div class="flex justify-between items-center mt-1">
                                 <p id="unit-item-count" class="text-sm font-semibold text-slate-600"></p>
                                 <button type="button" id="add-item-to-unit-btn" class="hidden text-sm bg-green-100 text-green-700 px-3 py-1 rounded-md hover:bg-green-200">
                                     + Adicionar Item
                                 </button>
                             </div>
-                            <!-- FIM DA ALTERAÇÃO -->
                         </div>
                         <div>
                             <label for="edit-filter-estado" class="block text-sm font-medium mb-1">Filtrar por Estado</label>
@@ -97,14 +95,12 @@
                             <input type="text" id="edit-filter-descricao" class="w-full p-2 border rounded-lg" placeholder="Digite para buscar...">
                         </div>
                     </div>
-                    <!-- INÍCIO DA ALTERAÇÃO: Adicionado novo botão "Atualizar do GIAP" -->
                     <div class="flex flex-wrap items-center gap-4">
                         <button id="save-all-changes-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-slate-400 flex items-center gap-2" disabled>
                             <span id="save-btn-spinner" class="hidden saving-spinner"></span>
                             <span id="save-btn-text">Salvar Alterações</span>
                         </button>
                         
-                        <!-- NOVO BOTÃO -->
                         <button id="update-all-from-giap-btn" class="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                                 <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
@@ -112,14 +108,12 @@
                             </svg>
                             Atualizar do GIAP
                         </button>
-                        <!-- FIM NOVO BOTÃO -->
                         
                         <button id="delete-selected-btn" class="hidden bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center gap-2">
                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11v1z"/></svg>
                            Excluir Selecionados (<span id="delete-selected-count">0</span>)
                         </button>
                     </div>
-                    <!-- FIM DA ALTERAÇÃO -->
                 </div>
                 <div class="card mt-6 p-0 overflow-hidden">
                     <div class="table-container overflow-y-auto">
@@ -212,13 +206,11 @@
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <!-- MELHORIA 2: Título da caixa -->
                                 <h3 class="font-semibold text-slate-800 mb-2">Itens sem Tombamento no Sistema (com Estado e Obs.)</h3>
                                 <input type="text" id="system-list-filter" class="w-full p-2 border rounded-lg mb-2" placeholder="Filtrar por descrição...">
                                 <div id="system-list" class="reconciliation-container border p-2 space-y-2 rounded-lg bg-slate-50 overflow-y-auto"></div>
                             </div>
                             <div>
-                                <!-- MELHORIA 1: Título da caixa (removido span) -->
                                 <h3 class="font-semibold text-slate-800 mb-2">Tombos Disponíveis (GIAP)</h3>
                                 <input type="text" id="giap-list-filter" class="w-full p-2 border rounded-lg mb-2" placeholder="Filtrar por descrição...">
                                 <div id="giap-list" class="reconciliation-container border p-2 space-y-2 rounded-lg bg-slate-50 overflow-y-auto"></div>
@@ -360,13 +352,14 @@
             <div id="content-importacao" class="hidden fade-in">
                 <div class="card">
                     <div class="flex border-b mb-6">
-                        <button class="sub-nav-btn" data-subtab="substituir">Substituir Inventário</button>
-                        <button class="sub-nav-btn active" data-subtab="edit-by-desc">Editar por Descrição</button>
+                        <!-- ATUALIZADO: "Editar por Descrição" é o padrão, "Substituir" está oculto -->
+                        <button class="sub-nav-btn hidden" data-subtab="substituir">Substituir Inventário</button>
+                        <button class="sub-nav-btn active" data-subtab="edit-by-desc">Importar e Atualizar Unidade</button>
                         <button class="sub-nav-btn" data-subtab="massa">Importar por Tombamento</button>
                         <button class="sub-nav-btn" data-subtab="add_giap">Adicionar Unidade GIAP</button>
                     </div>
             
-                    <!-- Sub-Aba: Substituir Inventário -->
+                    <!-- Sub-Aba: Substituir Inventário (Oculta) -->
                     <div id="subtab-content-substituir" class="hidden">
                         <h2 class="text-xl font-bold text-slate-800 mb-2">Substituir Inventário da Unidade por Planilha</h2>
                         <p class="text-sm text-slate-600 mb-4">Esta ferramenta <strong class="text-red-600">APAGARÁ</strong> todos os itens da unidade selecionada e os substituirá pelos dados colados abaixo. Use com muito cuidado.</p>
@@ -384,9 +377,7 @@
 
                         <div>
                             <label for="replace-data" class="block text-sm font-medium mb-1">Cole os dados do Excel aqui</label>
-                            <!-- INÍCIO DA ALTERAÇÃO: Texto de ajuda corrigido -->
                             <p class="text-xs text-slate-500 mb-2">Cole os dados do Excel, <strong class="text-red-600">incluindo o cabeçalho</strong>. O sistema espera as colunas: <strong>Descrição</strong> (ou ITEM), <strong>Tombamento</strong> (ou TOMBO), <strong>Local</strong> (ou LOCALIZAÇÃO), <strong>Estado de Conservação</strong> (ou ESTADO) e **Origem da Doação**.</p>
-                            <!-- FIM DA ALTERAÇÃO -->
                             <textarea id="replace-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
                         <button id="preview-replace-btn" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Visualizar Dados</button>
@@ -408,55 +399,53 @@
                         </div>
                     </div>
                     
-                    <!-- INÍCIO: Alterações na Sub-Aba: Editar por Descrição -->
+                    <!-- ATUALIZADO: Sub-Aba: Importar e Atualizar Unidade (Antiga "Editar por Descrição") -->
                     <div id="subtab-content-edit-by-desc">
-                        <h2 class="text-xl font-bold text-slate-800 mb-2">Atualizar Itens por Descrição (Importação Inteligente)</h2>
+                        <h2 class="text-xl font-bold text-slate-800 mb-2">Importar e Atualizar Inventário da Unidade</h2>
                         <p class="text-sm text-slate-600 mb-4">
-                            Esta ferramenta atualiza itens existentes. Ela compara sua planilha com o sistema usando <strong class="text-blue-600">descrição similar</strong>.
-                            Funciona para <strong class="text-green-600">uma ou mais unidades</strong> ao mesmo tempo.
+                            Selecione a unidade de destino, cole sua planilha (com cabeçalho) e compare os itens para atualizar o inventário um por um.
+                            A coluna 'UNIDADE' da sua planilha será ignorada.
                         </p>
                         
-                        <!-- 1. Seleção de Campos a Atualizar -->
-                        <div class="mb-4 p-4 border rounded-lg bg-slate-50">
-                            <label class="block text-base font-semibold mb-3 text-slate-800">1. Quais campos você deseja atualizar?</label>
-                            <p class="text-xs text-slate-500 mb-3">Marque os campos da sua planilha que devem <strong class="text-red-600">SOBRESCREVER</strong> os dados do sistema. Campos desmarcados serão ignorados.</p>
-                            <div id="edit-by-desc-fields" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Tombamento" checked>Tombamento</label>
-                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Localização" checked>Localização</label>
-                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Estado" checked>Estado</label>
-                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Observação">Observação</label>
-                                <label class="flex items-center p-3 bg-white border rounded-lg hover:bg-blue-50 cursor-pointer"><input type="checkbox" class="h-4 w-4 mr-2" data-field="Descrição">Descrição</label>
+                        <!-- 1. Seleção de Unidade (NOVO) -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 p-4 border rounded-lg bg-slate-50">
+                            <div>
+                                <label for="import-tipo" class="block text-sm font-medium mb-1">Tipo de Unidade de Destino</label>
+                                <select id="import-tipo" class="w-full p-2 border rounded-lg bg-white"></select>
+                            </div>
+                            <div>
+                                <label for="import-unit" class="block text-sm font-medium mb-1">Unidade de Destino (a ser atualizada)</label>
+                                <select id="import-unit" class="w-full p-2 border rounded-lg bg-white" disabled></select>
                             </div>
                         </div>
 
-                        <!-- 2. Colar Dados -->
+                        <!-- 2. Seleção de Campos a Atualizar (REMOVIDO) -->
+                        <div id="edit-by-desc-fields" class="hidden"></div>
+
+                        <!-- 3. Colar Dados (Mantido) -->
                         <div class="mb-4">
-                            <label for="edit-by-desc-data" class="block text-base font-semibold mb-2 text-slate-800">2. Cole os dados do Excel aqui (com cabeçalho)</label>
+                            <label for="edit-by-desc-data" class="block text-base font-semibold mb-2 text-slate-800">Cole os dados do Excel aqui (com cabeçalho)</label>
                             <p class="text-xs text-slate-500 mb-2">
-                                O sistema identificará os cabeçalhos: <strong class="text-blue-600">UNIDADE</strong> (Obrigatório), <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO (ou Estado de Conservação)</strong>, **ORIGEM DA DOACAO**, e **OBS (ou Observacao)**.
+                                O sistema identificará os cabeçalhos: <strong>ITEM (ou Descrição)</strong>, <strong>TOMBO (ou Tombamento)</strong>, <strong>LOCAL (ou Localização)</strong>, <strong>ESTADO (ou Estado de Conservação)</strong>, **ORIGEM DA DOACAO**, e **OBS (ou Observacao)**. A coluna 'UNIDADE' será ignorada.
                             </p>
                             <textarea id="edit-by-desc-data" rows="8" class="w-full p-2 border rounded-lg font-mono text-xs" placeholder="Copie as colunas do Excel, incluindo o cabeçalho, e cole aqui..."></textarea>
                         </div>
-                        <button id="preview-edit-by-desc-btn" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">1. Pré-visualizar Unidades</button>
+                        <button id="preview-compare-btn" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">1. Comparar Planilha com Inventário</button>
 
-                        <!-- 3. Mapeamento de Unidades (Nova Etapa) -->
+                        <!-- 4. Mapeamento de Unidades (REMOVIDO/OCULTO) -->
                         <div id="edit-by-desc-unit-matching" class="hidden mt-6 border-t pt-4">
                              <h3 class="font-bold text-slate-700 mb-2 text-base">2. Confirme o Mapeamento das Unidades</h3>
-                             <p class="text-sm text-slate-600 mb-4">Encontramos unidades na sua planilha. Confirme para qual unidade do sistema cada uma delas aponta. Unidades "Ignorar" não serão processadas.</p>
                              <div id="edit-by-desc-unit-table-container" class="reconciliation-container overflow-y-auto space-y-2 p-2 bg-slate-50 border rounded-lg">
-                                <!-- Tabela de mapeamento de unidades será inserida aqui -->
                              </div>
-                             <button id="confirm-unit-mapping-btn" class="mt-4 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">2. Confirmar Unidades e Ver Itens</button>
+                             <button id="confirm-unit-mapping-btn" class="hidden mt-4 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">2. Confirmar Unidades e Ver Itens</button>
                         </div>
 
-                        <!-- 4. Revisão dos Itens (Antigo Results) -->
+                        <!-- 5. Revisão dos Itens (Mantido) -->
                         <div id="edit-by-desc-results" class="hidden mt-6 border-t pt-4">
-                             <h3 class="font-bold text-slate-700 mb-2 text-base">3. Revise as Atualizações de Itens (<span id="edit-by-desc-preview-count">0</span> itens da planilha)</h3>
-                             <p class="text-sm text-slate-600 mb-4">Revise as correspondências. Itens em <span class="text-green-600 font-semibold">verde</span> tiveram alta similaridade e estão pré-selecionados para <strong class="text-green-800">Atualizar</strong>. Itens em <span class="text-yellow-600 font-semibold">amarelo</span> tiveram similaridade média. Itens em <span class="text-red-600 font-semibold">vermelho</span> não foram encontrados no sistema para esta unidade.</p>
+                             <h3 class="font-bold text-slate-700 mb-2 text-base">2. Revise as Comparações (<span id="edit-by-desc-preview-count">0</span> itens da planilha)</h3>
+                             <p class="text-sm text-slate-600 mb-4">Revise as correspondências. Itens em <span class="text-green-600 font-semibold">verde</span> tiveram alta similaridade e estão pré-selecionados para <strong class="text-green-800">Atualizar</strong>. Itens em <span class="text-red-600 font-semibold">vermelho</span> não foram encontrados no sistema para esta unidade.</p>
                             
-                             <!-- Controles de Ação em Massa -->
                              <div class="p-3 bg-slate-100 rounded-lg flex flex-wrap items-center gap-4 mb-4">
-                                 <!-- NOVO FILTRO DE AÇÃO -->
                                  <div class="flex items-center gap-2">
                                     <label for="edit-by-desc-action-filter" class="text-sm font-medium text-slate-700">Filtrar por Ação:</label>
                                     <select id="edit-by-desc-action-filter" class="p-2 border rounded-lg bg-white text-sm">
@@ -467,7 +456,6 @@
                                         <option value="manual">Manual</option>
                                     </select>
                                  </div>
-                                 <!-- FIM NOVO FILTRO -->
                                 <label class="flex items-center font-medium">
                                     <input type="checkbox" id="edit-by-desc-select-all" class="h-4 w-4 mr-2">
                                     Selecionar Todos
@@ -492,7 +480,7 @@
                     </div>
                     <!-- FIM: Alterações na Sub-Aba -->
 
-                    <!-- Sub-Aba: Importar em Massa (funcionalidade antiga) -->
+                    <!-- Sub-Aba: Importar em Massa (funcionalidade antiga mantida) -->
                     <div id="subtab-content-massa" class="hidden">
                          <h2 class="text-xl font-bold text-slate-800 mb-2">Importar Itens por Tombamento (GIAP)</h2>
                          <p class="text-sm text-slate-600 mb-4">Cole uma lista de tombamentos, escolha a unidade de destino e o sistema criará os itens baseado nos dados da planilha GIAP.</p>
@@ -531,7 +519,7 @@
                         </div>
                     </div>
 
-                    <!-- Sub-Aba: Adicionar Unidade GIAP -->
+                    <!-- Sub-Aba: Adicionar Unidade GIAP (Mantida) -->
                      <div id="subtab-content-add_giap" class="hidden">
                         <h2 class="text-xl font-bold text-slate-800 mb-2">Adicionar Nova Unidade (Padrão GIAP)</h2>
                         <p class="text-sm text-slate-600 mb-4">Adicione aqui uma nova unidade que ainda não existe na planilha GIAP. Ela ficará disponível na aba "Ligar Unidades".</p>
@@ -646,7 +634,6 @@
         </div>
     </div>
 
-    <!-- INÍCIO DA ALTERAÇÃO: Adicionado modal para adicionar item -->
     <div id="add-item-modal" class="modal fixed inset-0 z-[60] flex items-center justify-center p-4 hidden">
         <div class="modal-overlay absolute inset-0 bg-black/60"></div>
         <div class="modal-container bg-white w-full max-w-lg rounded-lg shadow-2xl flex flex-col transform scale-95">
@@ -690,7 +677,6 @@
             </form>
         </div>
     </div>
-    <!-- FIM DA ALTERAÇÃO -->
 
     <!-- MODAL DE ESCOLHA DE DESCRIÇÃO - NOVO -->
     <div id="desc-choice-modal" class="modal fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
@@ -718,7 +704,6 @@
         </div>
     </div>
     
-    <!-- INÍCIO DA ALTERAÇÃO: Novo Modal "Atualizar do GIAP" -->
     <div id="update-all-giap-modal" class="modal fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
         <div class="modal-overlay absolute inset-0 bg-black/60"></div>
         <div class="modal-container bg-white w-full max-w-3xl rounded-lg shadow-2xl flex flex-col transform scale-95">
@@ -742,7 +727,6 @@
              </div>
         </div>
     </div>
-    <!-- FIM DA ALTERAÇÃO -->
 
     <!-- MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (NOVO) -->
     <div id="delete-confirm-modal-edit" class="modal fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
@@ -760,7 +744,6 @@
         </div>
     </div>
 
-    <!-- INÍCIO DA ALTERAÇÃO: Novo Modal para Ligação Manual -->
     <div id="manual-link-modal" class="modal fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
         <div class="modal-overlay absolute inset-0 bg-black/60"></div>
         <div class="modal-container bg-white w-full max-w-2xl rounded-lg shadow-2xl flex flex-col transform scale-95">
@@ -778,7 +761,6 @@
 
                 <h4 class="font-bold text-slate-800">Ligar com qual item do Sistema?</h4>
                 <p class="text-sm text-slate-600">Selecione o item correto da unidade <strong id="manual-link-unit-name"></strong> que deve corresponder ao item acima. Apenas itens S/T são listados.</p>
-                <!-- Mensagem de feedback do filtro por localização -->
                 <div id="manual-link-filter-message" class="text-sm p-2 bg-blue-50 border-blue-200 border rounded-lg">
                     Listando todos os itens S/T desta unidade.
                 </div>
@@ -807,7 +789,6 @@
              </div>
         </div>
     </div>
-    <!-- FIM DA ALTERAÇÃO -->
 
     <!-- Full Page Overlay for saving -->
     <div id="full-page-overlay" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
