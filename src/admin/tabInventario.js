@@ -1,9 +1,9 @@
-// src/admin/tabInventario.js
+// src/admin/tabInventario.js// src/admin/tabInventario.js
 // Lógica da aba "Inventário Editável" (content-edicao).
 
 import { db, serverT, writeBatch, doc, updateDoc, deleteDoc, collection, addDoc } from '../services/firebase.js';
 import { getState, setState } from '../state/globalStore.js';
-import { showNotification, showOverlay, hideOverlay, normalizeStr, debounce, escapeHtml, normalizeTombo } from '../utils/helpers.js';
+import { showNotification, showOverlay, hideOverlay, normalizeStr, debounce, escapeHtml } from '../utils/helpers.js';
 import { idb } from '../services/cache.js';
 
 // --- ESTADO LOCAL/TRANSITÓRIO ---
@@ -11,211 +11,366 @@ let dirtyItems = new Map();
 let currentEditFilter = { tipo: '', unidade: '', estado: '', descricao: '' };
 
 const DOM_EDIT_INV = {
-    editTableBody: document.getElementById('edit-table-body'),
-    saveAllChangesBtn: document.getElementById('save-all-changes-btn'),
-    filtroTipo: document.getElementById('edit-filter-tipo'),
-    filtroUnidade: document.getElementById('edit-filter-unidade'),
-    filtroEstado: document.getElementById('edit-filter-estado'),
-    filtroDescricao: document.getElementById('edit-filter-descricao'),
-    deleteSelectedBtn: document.getElementById('delete-selected-btn'),
-    deleteSelectedCount: document.getElementById('delete-selected-count'),
-    selectAllCheckbox: document.getElementById('select-all-checkbox'),
-    deleteConfirmModal: document.getElementById('delete-confirm-modal-edit'),
-    unitItemCount: document.getElementById('unit-item-count'),
-    addItemToUnitBtn: document.getElementById('add-item-to-unit-btn'),
-    addItemModal: document.getElementById('add-item-modal'),
+  editTableBody: document.getElementById('edit-table-body'),
+  saveAllChangesBtn: document.getElementById('save-all-changes-btn'),
+  filtroTipo: document.getElementById('edit-filter-tipo'),
+  filtroUnidade: document.getElementById('edit-filter-unidade'),
+  filtroEstado: document.getElementById('edit-filter-estado'),
+  filtroDescricao: document.getElementById('edit-filter-descricao'),
+  deleteSelectedBtn: document.getElementById('delete-selected-btn'),
+  deleteSelectedCount: document.getElementById('delete-selected-count'),
+  selectAllCheckbox: document.getElementById('select-all-checkbox'),
+  deleteConfirmModal: document.getElementById('delete-confirm-modal-edit'),
+  unitItemCount: document.getElementById('unit-item-count'),
+  addItemToUnitBtn: document.getElementById('add-item-to-unit-btn'),
+  addItemModal: document.getElementById('add-item-modal'),
 };
 
-// --- FUNÇÕES DE UTILITY ---
 const getNormalizedEstado = (state) => {
-    const normalized = normalizeStr(state);
-    if (['avariado', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
-    if (normalized.startsWith('novo')) return 'Novo';
-    if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
-    if (normalized.startsWith('regular')) return 'Regular';
-    return 'N/D';
+  const normalized = normalizeStr(state || '');
+  if (['avariado', 'quebrado', 'defeito', 'danificado', 'ruim'].some(k => normalized.includes(k))) return 'Avariado';
+  if (normalized.startsWith('novo')) return 'Novo';
+  if (normalized.startsWith('bom') || normalized.startsWith('otimo')) return 'Bom';
+  if (normalized.startsWith('regular')) return 'Regular';
+  return 'N/D';
 };
 
-// --- FUNÇÕES DE RENDERIZAÇÃO ---
+// --- RENDER ---
 export function populateEditableInventoryTab() {
-    const { patrimonioFullList } = getState();
-    const tiposMap = new Map();
-    patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
-        const normalized = normalizeStr(tipo);
-        if (!tiposMap.has(normalized)) tiposMap.set(normalized, tipo.trim());
-    });
-    const tipos = [...tiposMap.values()].sort();
-    const estados = ['Novo', 'Bom', 'Regular', 'Avariado', 'N/D'];
+  const { patrimonioFullList } = getState();
+  const tiposMap = new Map();
+  patrimonioFullList.map(i => i.Tipo).filter(Boolean).forEach(tipo => {
+    const normalized = normalizeStr(tipo);
+    if (!tiposMap.has(normalized)) tiposMap.set(normalized, tipo.trim());
+  });
+  const tipos = [...tiposMap.values()].sort();
+  const estados = ['Novo', 'Bom', 'Regular', 'Avariado', 'N/D'];
 
-    DOM_EDIT_INV.filtroTipo.innerHTML = '<option value="">Todos os Tipos</option>' + tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-    DOM_EDIT_INV.filtroEstado.innerHTML = '<option value="">Todos os Estados</option>' + estados.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
-    renderEditableTable();
+  DOM_EDIT_INV.filtroTipo.innerHTML =
+    '<option value="">Todos os Tipos</option>' +
+    tipos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  DOM_EDIT_INV.filtroEstado.innerHTML =
+    '<option value="">Todos os Estados</option>' +
+    estados.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join('');
+
+  renderEditableTable();
 }
 
 export function renderEditableTable() {
-    const { patrimonioFullList } = getState();
-    const filteredItems = patrimonioFullList.filter(item => {
-        const { tipo, unidade, estado, descricao } = currentEditFilter;
-        if (tipo && normalizeStr(item.Tipo) !== normalizeStr(tipo)) return false;
-        if (unidade && normalizeStr(item.Unidade) !== normalizeStr(unidade)) return false;
-        if (estado && getNormalizedEstado(item.Estado) !== estado) return false;
-        if (descricao && !normalizeStr(item.Descrição).includes(descricao)) return false;
-        return true;
-    });
+  const { patrimonioFullList } = getState();
+  const filteredItems = patrimonioFullList.filter(item => {
+    const { tipo, unidade, estado, descricao } = currentEditFilter;
+    if (tipo && normalizeStr(item.Tipo) !== normalizeStr(tipo)) return false;
+    if (unidade && normalizeStr(item.Unidade) !== normalizeStr(unidade)) return false;
+    if (estado && getNormalizedEstado(item.Estado) !== estado) return false;
+    if (descricao && !normalizeStr(item.Descrição).includes(descricao)) return false;
+    return true;
+  });
 
-    const itemsToDisplay = filteredItems.slice(0, 200);
-    DOM_EDIT_INV.editTableBody.innerHTML = itemsToDisplay.length === 0
-        ? `<tr><td colspan="14" class="text-center p-10 text-slate-500">Nenhum item encontrado. Use os filtros para refinar sua busca.</td></tr>`
-        : itemsToDisplay.map(item => `
-            <tr id="row-${item.id}" class="${dirtyItems.has(item.id) ? 'is-dirty' : ''}">
-                <td class="p-2"><input type="checkbox" class="row-checkbox" data-id="${item.id}"></td>
-                <td class="p-2">
-                    <button class="save-row-btn p-1 text-green-600 hover:text-green-800" data-id="${item.id}" title="Salvar este item">✔</button>
-                    <button class="delete-row-btn p-1 text-red-600 hover:text-red-800" data-id="${item.id}" title="Excluir este item">✖</button>
-                </td>
-                <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tombamento" value="${escapeHtml(item.Tombamento || '')}"></td>
-                <td class="p-2"><button class="sync-giap-btn p-1 text-blue-600 hover:text-blue-800" data-id="${item.id}" title="Verificar/Sincronizar com Planilha GIAP">🔄</button></td>
-                <td class="p-2"><input type="text" class="w-64 editable-field" data-id="${item.id}" data-field="Descrição" value="${escapeHtml(item.Descrição || '')}"></td>
-                <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tipo" value="${escapeHtml(item.Tipo || '')}"></td>
-                <td class="p-2"><input type="text" class="w-48 editable-field" data-id="${item.id}" data-field="Unidade" value="${escapeHtml(item.Unidade || '')}"></td>
-                <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Localização" value="${escapeHtml(item.Localização || '')}"></td>
-                <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Fornecedor" value="${escapeHtml(item.Fornecedor || '')}"></td>
-                <td class="p-2"><input type="text" class="w-20 editable-field" data-id="${item.id}" data-field="NF" value="${escapeHtml(item.NF || '')}"></td>
-                <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Origem da Doação" value="${escapeHtml(item['Origem da Doação'] || '')}"></td>
-                <td class="p-2">
-                    <select class="w-28 editable-field" data-id="${item.id}" data-field="Estado">
-                        <option value="Novo" ${item.Estado === 'Novo' ? 'selected' : ''}>Novo</option>
-                        <option value="Bom" ${item.Estado === 'Bom' ? 'selected' : ''}>Bom</option>
-                        <option value="Regular" ${item.Estado === 'Regular' ? 'selected' : ''}>Regular</option>
-                        <option value="Avariado" ${item.Estado === 'Avariado' ? 'selected' : ''}>Avariado</option>
-                    </select>
-                </td>
-                <td class="p-2"><input type="number" class="w-16 editable-field" data-id="${item.id}" data-field="Quantidade" value="${item.Quantidade || 1}"></td>
-                <td class="p-2"><input type="text" class="w-48 editable-field" data-id="${item.id}" data-field="Observação" value="${escapeHtml(item.Observação || '')}"></td>
-            </tr>
-        `).join('');
+  const itemsToDisplay = filteredItems.slice(0, 200);
+  DOM_EDIT_INV.editTableBody.innerHTML = itemsToDisplay.length === 0
+    ? `<tr><td colspan="14" class="text-center p-10 text-slate-500">Nenhum item encontrado. Use os filtros para refinar sua busca.</td></tr>`
+    : itemsToDisplay.map(item => `
+      <tr id="row-${item.id}" class="${dirtyItems.has(item.id) ? 'is-dirty' : ''}">
+        <td class="p-2"><input type="checkbox" class="row-checkbox" data-id="${item.id}"></td>
+        <td class="p-2">
+          <button class="save-row-btn p-1 text-green-600 hover:text-green-800" data-id="${item.id}" title="Salvar este item">✔</button>
+          <button class="delete-row-btn p-1 text-red-600 hover:text-red-800" data-id="${item.id}" title="Excluir este item">✖</button>
+        </td>
+        <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tombamento" value="${escapeHtml(item.Tombamento || '')}"></td>
+        <td class="p-2"><button class="sync-giap-btn p-1 text-blue-600 hover:text-blue-800" data-id="${item.id}" title="Verificar/Sincronizar com Planilha GIAP">🔄</button></td>
+        <td class="p-2"><input type="text" class="w-64 editable-field" data-id="${item.id}" data-field="Descrição" value="${escapeHtml(item.Descrição || '')}"></td>
+        <td class="p-2"><input type="text" class="w-24 editable-field" data-id="${item.id}" data-field="Tipo" value="${escapeHtml(item.Tipo || '')}"></td>
+        <td class="p-2"><input type="text" class="w-48 editable-field" data-id="${item.id}" data-field="Unidade" value="${escapeHtml(item.Unidade || '')}"></td>
+        <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Localização" value="${escapeHtml(item.Localização || '')}"></td>
+        <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Fornecedor" value="${escapeHtml(item.Fornecedor || '')}"></td>
+        <td class="p-2"><input type="text" class="w-20 editable-field" data-id="${item.id}" data-field="NF" value="${escapeHtml(item.NF || '')}"></td>
+        <td class="p-2"><input type="text" class="w-32 editable-field" data-id="${item.id}" data-field="Origem da Doação" value="${escapeHtml(item['Origem da Doação'] || '')}"></td>
+        <td class="p-2">
+          <select class="w-28 editable-field" data-id="${item.id}" data-field="Estado">
+            <option value="Novo" ${item.Estado === 'Novo' ? 'selected' : ''}>Novo</option>
+            <option value="Bom" ${item.Estado === 'Bom' ? 'selected' : ''}>Bom</option>
+            <option value="Regular" ${item.Estado === 'Regular' ? 'selected' : ''}>Regular</option>
+            <option value="Avariado" ${item.Estado === 'Avariado' ? 'selected' : ''}>Avariado</option>
+          </select>
+        </td>
+        <td class="p-2"><input type="number" class="w-16 editable-field" data-id="${item.id}" data-field="Quantidade" value="${item.Quantidade || 1}"></td>
+        <td class="p-2"><input type="text" class="w-48 editable-field" data-id="${item.id}" data-field="Observação" value="${escapeHtml(item.Observação || '')}"></td>
+      </tr>
+    `).join('');
 
-    if (currentEditFilter.unidade) {
-        DOM_EDIT_INV.unitItemCount.textContent = `${filteredItems.length} itens encontrados.`;
-        DOM_EDIT_INV.addItemToUnitBtn.classList.remove('hidden');
-    } else {
-        DOM_EDIT_INV.unitItemCount.textContent = '';
-        DOM_EDIT_INV.addItemToUnitBtn.classList.add('hidden');
-    }
-    updateDeleteButtonState();
+  if (currentEditFilter.unidade) {
+    DOM_EDIT_INV.unitItemCount.textContent = `${filteredItems.length} itens encontrados.`;
+    DOM_EDIT_INV.addItemToUnitBtn?.classList?.remove('hidden');
+  } else {
+    DOM_EDIT_INV.unitItemCount.textContent = '';
+    DOM_EDIT_INV.addItemToUnitBtn?.classList?.add('hidden');
+  }
+  updateDeleteButtonState();
 }
 
 // --- BOTÕES E ESTADOS ---
 function updateDeleteButtonState() {
-    const checked = DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox:checked');
-    const count = checked.length;
-    DOM_EDIT_INV.deleteSelectedCount.textContent = count;
-    DOM_EDIT_INV.deleteSelectedBtn.classList.toggle('hidden', count === 0);
+  const checked = DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox:checked');
+  const count = checked.length;
+  DOM_EDIT_INV.deleteSelectedCount.textContent = count;
+  DOM_EDIT_INV.deleteSelectedBtn.classList.toggle('hidden', count === 0);
 }
 
-// --- SALVAR E EXCLUIR ---
+// --- SALVAR E EXCLUIR EM LOTE ---
 async function saveAllChanges(shouldReload = true) {
-    if (dirtyItems.size === 0) return;
-    showOverlay(`Salvando ${dirtyItems.size} alterações...`);
-    const batch = writeBatch(db);
-    const itemsToSave = new Map(dirtyItems);
-    dirtyItems.clear();
-    DOM_EDIT_INV.saveAllChangesBtn.disabled = true;
+  if (dirtyItems.size === 0) return;
+  showOverlay(`Salvando ${dirtyItems.size} alterações...`);
+  const batch = writeBatch(db);
+  const itemsToSave = new Map(dirtyItems);
+  dirtyItems.clear();
+  DOM_EDIT_INV.saveAllChangesBtn.disabled = true;
 
-    itemsToSave.forEach((changes, id) => {
-        const itemRef = doc(db, 'patrimonio', id);
-        batch.update(itemRef, { ...changes, updatedAt: serverT() });
-    });
+  itemsToSave.forEach((changes, id) => {
+    const itemRef = doc(db, 'patrimonio', id);
+    batch.update(itemRef, { ...changes, updatedAt: serverT() });
+  });
 
-    try {
-        await batch.commit();
-        showNotification(`${itemsToSave.size} alterações salvas com sucesso!`, 'success');
-        if (shouldReload) await idb.metadata.clear();
-    } catch (error) {
-        console.error("Erro ao salvar alterações:", error);
-        showNotification('Erro ao salvar alterações.', 'error');
-        dirtyItems = new Map([...itemsToSave, ...dirtyItems]);
-        DOM_EDIT_INV.saveAllChangesBtn.disabled = dirtyItems.size > 0;
-    } finally {
-        hideOverlay();
-    }
+  try {
+    await batch.commit();
+    showNotification(`${itemsToSave.size} alterações salvas com sucesso!`, 'success');
+    if (shouldReload) await idb.metadata.clear();
+  } catch (error) {
+    console.error("Erro ao salvar alterações:", error);
+    showNotification('Erro ao salvar alterações.', 'error');
+    dirtyItems = new Map([...itemsToSave, ...dirtyItems]);
+    DOM_EDIT_INV.saveAllChangesBtn.disabled = dirtyItems.size > 0;
+  } finally {
+    hideOverlay();
+  }
 }
 
 async function deleteItems(ids) {
-    showOverlay(`Excluindo ${ids.length} itens...`);
-    const batch = writeBatch(db);
-    ids.forEach(id => batch.delete(doc(db, 'patrimonio', id)));
+  showOverlay(`Excluindo ${ids.length} itens...`);
+  const batch = writeBatch(db);
+  ids.forEach(id => batch.delete(doc(db, 'patrimonio', id)));
 
-    try {
-        await batch.commit();
-        showNotification(`${ids.length} item(s) excluído(s)!`, 'success');
-        await idb.metadata.clear();
-    } catch (error) {
-        console.error("Erro ao excluir itens:", error);
-        showNotification('Erro ao excluir itens.', 'error');
-    } finally {
-        hideOverlay();
-    }
+  try {
+    await batch.commit();
+    showNotification(`${ids.length} item(s) excluído(s)!`, 'success');
+    await idb.metadata.clear();
+  } catch (error) {
+    console.error("Erro ao excluir itens:", error);
+    showNotification('Erro ao excluir itens.', 'error');
+  } finally {
+    hideOverlay();
+  }
 }
 
 // --- PRINCIPAL: LISTENERS ---
 export function setupInventarioListeners(reloadDataCallback, openSyncModalCallback) {
-    const debouncedRender = debounce(() => {
-        currentEditFilter.descricao = DOM_EDIT_INV.filtroDescricao.value;
-        renderEditableTable();
-    }, 300);
+  // Filtros
+  const debouncedRender = debounce(() => {
+    currentEditFilter.descricao = DOM_EDIT_INV.filtroDescricao.value;
+    renderEditableTable();
+  }, 300);
 
-    DOM_EDIT_INV.filtroTipo.addEventListener('change', () => {
-        const { patrimonioFullList } = getState();
-        const selectedTipo = DOM_EDIT_INV.filtroTipo.value;
-        currentEditFilter.tipo = selectedTipo;
-        const unidadesMap = new Map();
-        (selectedTipo
-            ? patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean)
-            : []
-        ).forEach(unidade => {
-            const normalized = normalizeStr(unidade);
-            if (!unidadesMap.has(normalized)) unidadesMap.set(normalized, unidade.trim());
-        });
-        const unidades = [...unidadesMap.values()].sort();
-        DOM_EDIT_INV.filtroUnidade.innerHTML = '<option value="">Todas as Unidades</option>' + unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
-        DOM_EDIT_INV.filtroUnidade.disabled = !selectedTipo;
-        currentEditFilter.unidade = '';
-        renderEditableTable();
+  DOM_EDIT_INV.filtroTipo.addEventListener('change', () => {
+    const { patrimonioFullList } = getState();
+    const selectedTipo = DOM_EDIT_INV.filtroTipo.value;
+    currentEditFilter.tipo = selectedTipo;
+
+    const unidadesMap = new Map();
+    (selectedTipo
+      ? patrimonioFullList.filter(i => normalizeStr(i.Tipo) === normalizeStr(selectedTipo)).map(i => i.Unidade).filter(Boolean)
+      : []
+    ).forEach(unidade => {
+      const normalized = normalizeStr(unidade);
+      if (!unidadesMap.has(normalized)) unidadesMap.set(normalized, unidade.trim());
     });
+    const unidades = [...unidadesMap.values()].sort();
 
-    DOM_EDIT_INV.filtroUnidade.addEventListener('change', () => {
-        currentEditFilter.unidade = DOM_EDIT_INV.filtroUnidade.value;
-        renderEditableTable();
-    });
+    DOM_EDIT_INV.filtroUnidade.innerHTML =
+      '<option value="">Todas as Unidades</option>' +
+      unidades.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
+    DOM_EDIT_INV.filtroUnidade.disabled = !selectedTipo;
+    currentEditFilter.unidade = '';
+    renderEditableTable();
+  });
 
-    DOM_EDIT_INV.filtroEstado.addEventListener('change', () => {
-        currentEditFilter.estado = DOM_EDIT_INV.filtroEstado.value;
-        renderEditableTable();
-    });
-    DOM_EDIT_INV.filtroDescricao.addEventListener('input', debouncedRender);
+  DOM_EDIT_INV.filtroUnidade.addEventListener('change', () => {
+    currentEditFilter.unidade = DOM_EDIT_INV.filtroUnidade.value;
+    renderEditableTable();
+  });
 
-    // SALVAR TODOS
-    DOM_EDIT_INV.saveAllChangesBtn.addEventListener('click', () => saveAllChanges(reloadDataCallback));
+  DOM_EDIT_INV.filtroEstado.addEventListener('change', () => {
+    currentEditFilter.estado = DOM_EDIT_INV.filtroEstado.value;
+    renderEditableTable();
+  });
 
-    // EXCLUIR SELECIONADOS
-    DOM_EDIT_INV.deleteSelectedBtn.addEventListener('click', () => {
-        const { patrimonioFullList } = getState();
-        const checked = DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox:checked');
-        if (checked.length === 0) return;
-        const ids = Array.from(checked).map(cb => cb.dataset.id);
-        const firstItem = patrimonioFullList.find(i => i.id === ids[0]);
-        document.getElementById('delete-modal-title').textContent = `Excluir ${ids.length} item(ns)?`;
-        document.getElementById('delete-item-info-edit').textContent = `${firstItem.Unidade} (${firstItem.Tipo})`;
-        document.getElementById('confirm-delete-btn-edit').dataset.idsToDelete = JSON.stringify(ids);
-        DOM_EDIT_INV.deleteConfirmModal.classList.remove('hidden');
-    });
+  DOM_EDIT_INV.filtroDescricao.addEventListener('input', debouncedRender);
 
-    // CONFIRMAÇÃO EXCLUSÃO
-    document.getElementById('confirm-delete-btn-edit').addEventListener('click', async (e) => {
-        const idsToDelete = e.target.dataset.idsToDelete;
-        DOM_EDIT_INV.deleteConfirmModal.classList.add('hidden');
-        if (idsToDelete) await deleteItems(JSON.parse(idsToDelete));
-        reloadDataCallback(true);
-    });
+  // MARCAR "SUJO" ao editar campos
+  DOM_EDIT_INV.editTableBody.addEventListener('change', (e) => {
+    const target = e.target;
+    const id = target.dataset.id;
+    const field = target.dataset.field;
+    let value = target.value;
+
+    if (!id || !field) return;
+    if (field === 'Quantidade') value = parseInt(value, 10) || 1;
+
+    const currentChanges = dirtyItems.get(id) || {};
+    dirtyItems.set(id, { ...currentChanges, [field]: value });
+    document.getElementById(`row-${id}`)?.classList?.add('is-dirty');
+    DOM_EDIT_INV.saveAllChangesBtn.disabled = false;
+  });
+
+  // CLIQUES NA TABELA (save, delete, sync, checkbox)
+  DOM_EDIT_INV.editTableBody.addEventListener('click', async (e) => {
+    const { patrimonioFullList } = getState();
+    const btn = e.target.closest('button');
+
+    // Checkbox de linha
+    if (!btn && e.target.classList.contains('row-checkbox')) {
+      updateDeleteButtonState();
+      return;
+    }
+    if (!btn) return;
+
+    const id = btn.dataset.id;
+
+    // Salvar linha
+    if (btn.classList.contains('save-row-btn')) {
+      if (!id || !dirtyItems.has(id)) {
+        showNotification('Nenhuma alteração pendente para salvar.', 'warning');
+        return;
+      }
+      showOverlay('Salvando item...');
+      const changes = dirtyItems.get(id);
+      dirtyItems.delete(id);
+      DOM_EDIT_INV.saveAllChangesBtn.disabled = dirtyItems.size === 0;
+
+      try {
+        const itemRef = doc(db, 'patrimonio', id);
+        await updateDoc(itemRef, { ...changes, updatedAt: serverT() });
+        document.getElementById(`row-${id}`)?.classList?.remove('is-dirty');
+
+        const idx = patrimonioFullList.findIndex(i => i.id === id);
+        if (idx > -1) {
+          const updatedItem = { ...patrimonioFullList[idx], ...changes };
+          patrimonioFullList[idx] = updatedItem;
+          setState({ patrimonioFullList });
+          await idb.patrimonio.put(updatedItem);
+        }
+        showNotification('Item salvo com sucesso!', 'success');
+      } catch (err) {
+        console.error('Erro ao salvar item:', err);
+        showNotification('Erro ao salvar item.', 'error');
+      } finally {
+        hideOverlay();
+      }
+      return;
+    }
+
+    // Excluir linha (abre modal)
+    if (btn.classList.contains('delete-row-btn')) {
+      if (!id) return;
+      const item = patrimonioFullList.find(i => i.id === id);
+      document.getElementById('delete-item-info-edit').textContent =
+        `Tombo: ${item?.Tombamento || 'S/T'} - ${item?.Descrição || ''}`;
+      document.getElementById('confirm-delete-btn-edit').dataset.idToDelete = id;
+      DOM_EDIT_INV.deleteConfirmModal.classList.remove('hidden');
+      return;
+    }
+
+    // SINCRONIZAR COM GIAP (SALVA ANTES, DEPOIS CHAMA CALLBACK)
+    if (btn.classList.contains('sync-giap-btn')) {
+      if (!id) return;
+
+      let item = patrimonioFullList.find(i => i.id === id);
+      if (!item) return;
+
+      // Se tiver alterações pendentes para este item, salvar primeiro
+      if (dirtyItems.has(id)) {
+        showOverlay('Salvando alterações pendentes antes de sincronizar...');
+        const changes = dirtyItems.get(id);
+        try {
+          await updateDoc(doc(db, 'patrimonio', id), { ...changes, updatedAt: serverT() });
+          dirtyItems.delete(id);
+          document.getElementById(`row-${id}`)?.classList?.remove('is-dirty');
+          DOM_EDIT_INV.saveAllChangesBtn.disabled = dirtyItems.size === 0;
+
+          // Atualiza item em memória e IDB
+          item = { ...item, ...changes };
+          const idx = patrimonioFullList.findIndex(i => i.id === id);
+          if (idx > -1) {
+            patrimonioFullList[idx] = item;
+            setState({ patrimonioFullList });
+          }
+          await idb.patrimonio.put(item);
+
+          showNotification('Item salvo! Sincronizando...', 'success');
+        } catch (err) {
+          console.error('Erro ao salvar item antes de sincronizar:', err);
+          showNotification('Erro ao salvar item. A sincronização foi cancelada.', 'error');
+          hideOverlay();
+          return;
+        } finally {
+          hideOverlay();
+        }
+      }
+
+      // Abre modal/callback de sincronização GIAP com o item atualizado
+      try {
+        openSyncModalCallback?.(item);
+      } catch (err) {
+        console.error('openSyncModalCallback falhou:', err);
+        showNotification('Não foi possível abrir a sincronização.', 'error');
+      }
+      return;
+    }
+  });
+
+  // Checkbox Mestre (Selecionar Todos)
+  DOM_EDIT_INV.selectAllCheckbox?.addEventListener('change', (e) => {
+    DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = e.target.checked; });
+    updateDeleteButtonState();
+  });
+
+  // Salvar tudo
+  DOM_EDIT_INV.saveAllChangesBtn.addEventListener('click', () => saveAllChanges(reloadDataCallback));
+
+  // Excluir selecionados (abre modal)
+  DOM_EDIT_INV.deleteSelectedBtn.addEventListener('click', () => {
+    const { patrimonioFullList } = getState();
+    const checked = DOM_EDIT_INV.editTableBody.querySelectorAll('.row-checkbox:checked');
+    if (checked.length === 0) return;
+
+    const ids = Array.from(checked).map(cb => cb.dataset.id);
+    const firstItem = patrimonioFullList.find(i => i.id === ids[0]);
+    document.getElementById('delete-modal-title').textContent = `Excluir ${ids.length} item(ns)?`;
+    document.getElementById('delete-item-info-edit').textContent =
+      `Excluindo a partir de: ${firstItem?.Unidade || ''} (${firstItem?.Tipo || ''}).`;
+    const confirmBtn = document.getElementById('confirm-delete-btn-edit');
+    confirmBtn.dataset.idsToDelete = JSON.stringify(ids);
+    delete confirmBtn.dataset.idToDelete;
+    DOM_EDIT_INV.deleteConfirmModal.classList.remove('hidden');
+  });
+
+  // Confirmar exclusão (modal)
+  document.getElementById('confirm-delete-btn-edit').addEventListener('click', async (e) => {
+    const idToDelete = e.target.dataset.idToDelete;
+    const idsToDelete = e.target.dataset.idsToDelete;
+    DOM_EDIT_INV.deleteConfirmModal.classList.add('hidden');
+
+    if (idToDelete) {
+      await deleteItems([idToDelete]);
+    } else if (idsToDelete) {
+      await deleteItems(JSON.parse(idsToDelete));
+    }
+    reloadDataCallback(true);
+  });
+
+  // Fechar modal de exclusão
+  DOM_EDIT_INV.deleteConfirmModal.addEventListener('click', (e) => {
+    if (e.target.matches('.js-close-modal-delete') || e.target.matches('.modal-overlay')) {
+      DOM_EDIT_INV.deleteConfirmModal.classList.add('hidden');
+    }
+  });
 }
